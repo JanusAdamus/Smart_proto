@@ -1,0 +1,4 @@
+zeroconf>=0.131
+matplotlib>=3.8
+pyinstaller>=6.3
+pytest>=8.0
