@@ -1,12 +1,13 @@
+# relay.py
 import socket
 import threading
 import time
 
 from zeroconf import Zeroconf
 
-from discovery import ServiceWaiter, advertise_service
+from discovery import advertise_service
+from serial_link import wait_and_open, BAUDRATE
 
-UPSTREAM_SERVICE = "_metersim._tcp.local."
 DOWNSTREAM_SERVICE = "_smartmeter._tcp.local."
 DOWNSTREAM_PORT = 4000
 
@@ -32,7 +33,7 @@ class RelayServer:
                 conn, _addr = self.sock.accept()
             except OSError:
                 break
-            conn.settimeout(5.0)  # Fix: prevent hung clients from blocking broadcasts
+            conn.settimeout(5.0)
             with self.lock:
                 self.clients.append(conn)
 
@@ -53,27 +54,25 @@ class RelayServer:
             self.sock.close()
 
 
-def connect_upstream(ip, port, retry_seconds=3.0, attempts=5):
-    for _ in range(attempts):
+def serial_reader_loop(relay: RelayServer, serial_factory=None, retry_seconds=2.0):
+    serial_factory = serial_factory or (lambda: wait_and_open(BAUDRATE))
+    while True:
         try:
-            sock = socket.create_connection((ip, port), timeout=5.0)
-            print(f"upstream conectado: {ip}:{port}")
-            return sock
+            ser = serial_factory()
         except OSError:
             time.sleep(retry_seconds)
-    print(f"no se pudo conectar a {ip}:{port} tras {attempts} intentos, re-descubriendo")
-    return None
-
-
-def wait_for_meter(zc):
-    while True:
-        waiter = ServiceWaiter(zc, UPSTREAM_SERVICE)
-        try:
-            ip, port = waiter.wait(timeout=3.0)
-            print(f"servicio meter descubierto: {ip}:{port}")
-            return ip, port
-        except TimeoutError:
             continue
+        print(f"puerto serie conectado: {ser.port}")
+        try:
+            while True:
+                chunk = ser.read(4096)
+                if not chunk:
+                    continue
+                relay.broadcast(chunk)
+        except OSError:
+            print("puerto serie perdido, reintentando")
+        finally:
+            ser.close()
 
 
 def main():
@@ -82,24 +81,8 @@ def main():
     relay = RelayServer()
     relay.start()
     advertise_service(zc, DOWNSTREAM_SERVICE, "smartmeter", DOWNSTREAM_PORT)
-    print(f"relay escuchando en puerto {DOWNSTREAM_PORT}")
 
-    while True:
-        upstream_ip, upstream_port = wait_for_meter(zc)
-        upstream = connect_upstream(upstream_ip, upstream_port)
-        if upstream is None:
-            continue
-        try:
-            while True:
-                chunk = upstream.recv(4096)
-                if not chunk:
-                    break
-                relay.broadcast(chunk)
-        except OSError:
-            pass
-        finally:
-            print("upstream desconectado")
-            upstream.close()
+    serial_reader_loop(relay)
 
 
 if __name__ == "__main__":
