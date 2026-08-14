@@ -35,7 +35,10 @@ class MeterSerialWriter:
             try:
                 self.ser.write(telegram)
             except OSError:
-                self.ser.close()
+                try:
+                    self.ser.close()
+                except OSError:
+                    pass
                 self.ser = None
                 continue
             with self.lock:
@@ -45,7 +48,8 @@ class MeterSerialWriter:
 
     def status(self):
         with self.lock:
-            port = self.ser.port if self.ser else None
+            ser = self.ser
+            port = ser.port if ser else None
             return port, self.sent_count, list(self.log)
 
     def stop(self):

@@ -62,21 +62,22 @@ def serial_reader_loop(relay: RelayServer, serial_factory=None, retry_seconds=2.
         except OSError:
             time.sleep(retry_seconds)
             continue
-        print(f"puerto serie conectado: {ser.port}")
+        print(f"serial port connected: {ser.port}")
         try:
             while True:
-                chunk = ser.read(4096)
+                chunk = ser.read(ser.in_waiting or 1)
                 if not chunk:
                     continue
                 relay.broadcast(chunk)
         except OSError:
-            print("puerto serie perdido, reintentando")
+            print("serial port lost, retrying")
         finally:
             ser.close()
         time.sleep(retry_seconds)
 
 
 def main():
+    print("relay starting")
     zc = Zeroconf()
 
     relay = RelayServer()

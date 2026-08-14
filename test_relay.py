@@ -42,3 +42,29 @@ def test_serial_reader_loop_forwards_bytes_to_relay_clients():
     finally:
         relay.stop()
         ser.close()
+
+
+def test_serial_reader_loop_delivers_without_waiting_for_full_timeout():
+    # regression for Finding 1: ser.read(4096) blocks for the whole read
+    # timeout when fewer bytes are available; ser.in_waiting-based read
+    # should return as soon as the buffered bytes show up instead.
+    ser = serial.serial_for_url("loop://", timeout=5)
+    relay = RelayServer(port=14002)
+    relay.start()
+    try:
+        client = socket.create_connection(("127.0.0.1", 14002), timeout=5.0)
+        time.sleep(0.2)
+        threading.Thread(
+            target=serial_reader_loop,
+            args=(relay,),
+            kwargs={"serial_factory": lambda: ser},
+            daemon=True,
+        ).start()
+        ser.write(b"hola\r\n")
+        start = time.time()
+        assert client.recv(100) == b"hola\r\n"
+        assert time.time() - start < 1.0
+        client.close()
+    finally:
+        relay.stop()
+        ser.close()

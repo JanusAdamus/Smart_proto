@@ -17,6 +17,6 @@ def wait_and_open(baudrate=BAUDRATE, poll_seconds=2.0, timeout=5.0):
         if port:
             try:
                 return serial.Serial(port, baudrate=baudrate, timeout=timeout)
-            except OSError:
-                pass
+            except OSError as e:
+                print(f"no se pudo abrir {port}: {e}")
         time.sleep(poll_seconds)
