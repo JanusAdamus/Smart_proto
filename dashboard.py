@@ -47,6 +47,7 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
             continue
         try:
             sock = socket.create_connection((ip, port), timeout=5.0)
+            sock.settimeout(None)
         except OSError:
             time.sleep(3.0)
             continue
@@ -59,7 +60,8 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
                 for raw in reader.feed(chunk):
                     try:
                         fields = parse_telegram(raw)
-                    except InvalidTelegram:
+                    except InvalidTelegram as e:
+                        print(f"telegrama descartado: {e}")
                         continue
                     state.update(fields)
         except OSError:
