@@ -47,7 +47,7 @@ aunque los valores sean sintéticos):
 1-0:1.7.0(002.345*kW)
 1-0:1.8.1(000671.578*kWh)
 1-0:32.7.0(230.4*V)
-!7C56
+!5091
 ```
 
 - Línea 1: identificación del medidor, fija (`/ISK5\2MT382-1000`).
@@ -59,7 +59,7 @@ aunque los valores sean sintéticos):
   aleatorio, no en 0, para simular un contador "usado").
 - `1-0:32.7.0`: voltaje instantáneo, `NNN.N*V`.
 - Línea final `!XXXX`: checksum CRC16/ARC (polinomio `0xA001`, init `0x0000`,
-  sin reflejar entrada/salida — es la variante estándar de DSMR) en
+  con entrada y salida reflejadas — es la variante estándar de DSMR) en
   hexadecimal mayúsculas de 4 dígitos, calculado sobre todos los bytes desde
   el `/` inicial hasta el `!` inclusive.
 - Terminador de línea: `\r\n` en cada línea, incluida la del checksum.

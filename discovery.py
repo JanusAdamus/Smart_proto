@@ -10,6 +10,8 @@ def get_local_ip() -> str:
     try:
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
+    except OSError:
+        return socket.gethostbyname(socket.gethostname())
     finally:
         s.close()
 

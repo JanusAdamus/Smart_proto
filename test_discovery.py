@@ -1,6 +1,24 @@
 # test_discovery.py (versión final, usa Zeroconf real)
+import socket
+
 from zeroconf import Zeroconf
-from discovery import ServiceWaiter
+from discovery import ServiceWaiter, get_local_ip
+
+
+def test_get_local_ip_falls_back_when_no_default_route(monkeypatch):
+    class FakeSocket:
+        def connect(self, addr):
+            raise OSError("network unreachable")
+
+        def getsockname(self):
+            raise AssertionError("should not be called after connect fails")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: FakeSocket())
+    monkeypatch.setattr(socket, "gethostbyname", lambda host: "127.0.0.1")
+    assert get_local_ip() == "127.0.0.1"
 
 
 def test_service_waiter_times_out_when_nothing_found():

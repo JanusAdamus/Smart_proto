@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 import tkinter as tk
+from tkinter import messagebox
 from collections import deque
 
 import matplotlib
@@ -71,40 +72,46 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
 
 
 def main():
-    zc = Zeroconf()
-    state = DashboardState()
-    threading.Thread(target=reader_thread, args=(state, zc), daemon=True).start()
+    try:
+        zc = Zeroconf()
+        state = DashboardState()
+        threading.Thread(target=reader_thread, args=(state, zc), daemon=True).start()
 
-    root = tk.Tk()
-    root.title("Consumo en vivo")
-    root.geometry("500x420")
+        root = tk.Tk()
+        root.title("Consumo en vivo")
+        root.geometry("500x420")
 
-    kw_label = tk.Label(root, text="-- kW", font=("Segoe UI", 32))
-    kw_label.pack(pady=10)
-    info_label = tk.Label(root, text="Buscando smart meter...", font=("Segoe UI", 11))
-    info_label.pack()
+        kw_label = tk.Label(root, text="-- kW", font=("Segoe UI", 32))
+        kw_label.pack(pady=10)
+        info_label = tk.Label(root, text="Buscando smart meter...", font=("Segoe UI", 11))
+        info_label.pack()
 
-    fig = Figure(figsize=(5, 2.5))
-    ax = fig.add_subplot(111)
-    line, = ax.plot([], [])
-    ax.set_ylim(0, 4.5)
-    canvas = FigureCanvasTkAgg(fig, master=root)
-    canvas.get_tk_widget().pack(pady=10)
+        fig = Figure(figsize=(5, 2.5))
+        ax = fig.add_subplot(111)
+        line, = ax.plot([], [])
+        ax.set_ylim(0, 4.5)
+        canvas = FigureCanvasTkAgg(fig, master=root)
+        canvas.get_tk_widget().pack(pady=10)
 
-    def refresh():
-        values, voltage, kwh, last_update = state.snapshot()
-        if values:
-            kw_label.config(text=f"{values[-1]:.2f} kW")
-            stale = (time.time() - last_update) > 5.0
-            status = "Sin datos recientes" if stale else "En vivo"
-            info_label.config(text=f"{status} · {voltage:.1f} V · {kwh:.2f} kWh hoy")
-            line.set_data(range(len(values)), values)
-            ax.set_xlim(0, max(len(values), 1))
-            canvas.draw_idle()
-        root.after(1000, refresh)
+        def refresh():
+            values, voltage, kwh, last_update = state.snapshot()
+            if values:
+                kw_label.config(text=f"{values[-1]:.2f} kW")
+                stale = (time.time() - last_update) > 5.0
+                status = "Sin datos recientes" if stale else "En vivo"
+                info_label.config(text=f"{status} · {voltage:.1f} V · {kwh:.2f} kWh hoy")
+                line.set_data(range(len(values)), values)
+                ax.set_xlim(0, max(len(values), 1))
+                canvas.draw_idle()
+            root.after(1000, refresh)
 
-    refresh()
-    root.mainloop()
+        refresh()
+        root.mainloop()
+    except Exception as e:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Consumo en vivo - Error", str(e))
+        raise
 
 
 if __name__ == "__main__":

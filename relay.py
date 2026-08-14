@@ -53,19 +53,25 @@ class RelayServer:
             self.sock.close()
 
 
-def connect_upstream(ip, port, retry_seconds=3.0):
-    while True:
+def connect_upstream(ip, port, retry_seconds=3.0, attempts=5):
+    for _ in range(attempts):
         try:
-            return socket.create_connection((ip, port), timeout=5.0)
+            sock = socket.create_connection((ip, port), timeout=5.0)
+            print(f"upstream conectado: {ip}:{port}")
+            return sock
         except OSError:
             time.sleep(retry_seconds)
+    print(f"no se pudo conectar a {ip}:{port} tras {attempts} intentos, re-descubriendo")
+    return None
 
 
 def wait_for_meter(zc):
     while True:
         waiter = ServiceWaiter(zc, UPSTREAM_SERVICE)
         try:
-            return waiter.wait(timeout=3.0)
+            ip, port = waiter.wait(timeout=3.0)
+            print(f"servicio meter descubierto: {ip}:{port}")
+            return ip, port
         except TimeoutError:
             continue
 
@@ -76,10 +82,13 @@ def main():
     relay = RelayServer()
     relay.start()
     advertise_service(zc, DOWNSTREAM_SERVICE, "smartmeter", DOWNSTREAM_PORT)
+    print(f"relay escuchando en puerto {DOWNSTREAM_PORT}")
 
     while True:
         upstream_ip, upstream_port = wait_for_meter(zc)
         upstream = connect_upstream(upstream_ip, upstream_port)
+        if upstream is None:
+            continue
         try:
             while True:
                 chunk = upstream.recv(4096)
@@ -89,6 +98,7 @@ def main():
         except OSError:
             pass
         finally:
+            print("upstream desconectado")
             upstream.close()
 
 

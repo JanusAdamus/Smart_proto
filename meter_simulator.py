@@ -3,6 +3,7 @@ import socket
 import threading
 import time
 import tkinter as tk
+from tkinter import messagebox
 
 from zeroconf import Zeroconf
 
@@ -65,31 +66,37 @@ class MeterServer:
 
 
 def main():
-    server = MeterServer()
-    server.start()
+    try:
+        server = MeterServer()
+        server.start()
 
-    zc = Zeroconf()
-    info = advertise_service(zc, "_metersim._tcp.local.", "meter", PORT)
+        zc = Zeroconf()
+        info = advertise_service(zc, "_metersim._tcp.local.", "meter", PORT)
 
-    root = tk.Tk()
-    root.title("Smart Meter Simulator")
-    root.geometry("320x120")
-    label = tk.Label(root, text="Simulando...", font=("Segoe UI", 14))
-    label.pack(pady=20)
+        root = tk.Tk()
+        root.title("Smart Meter Simulator")
+        root.geometry("320x120")
+        label = tk.Label(root, text="Simulando...", font=("Segoe UI", 14))
+        label.pack(pady=20)
 
-    def update_label():
-        label.config(text=f"Simulando... {server.client_count()} cliente(s) conectados")
-        root.after(1000, update_label)
+        def update_label():
+            label.config(text=f"Simulando... {server.client_count()} cliente(s) conectados")
+            root.after(1000, update_label)
 
-    def on_close():
-        server.stop()
-        zc.unregister_service(info)
-        zc.close()
-        root.destroy()
+        def on_close():
+            server.stop()
+            zc.unregister_service(info)
+            zc.close()
+            root.destroy()
 
-    root.protocol("WM_DELETE_WINDOW", on_close)
-    update_label()
-    root.mainloop()
+        root.protocol("WM_DELETE_WINDOW", on_close)
+        update_label()
+        root.mainloop()
+    except Exception as e:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Smart Meter Simulator - Error", str(e))
+        raise
 
 
 if __name__ == "__main__":
