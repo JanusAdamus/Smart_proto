@@ -62,7 +62,7 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
                     try:
                         fields = parse_telegram(raw)
                     except InvalidTelegram as e:
-                        print(f"telegrama descartado: {e}")
+                        print(f"discarded telegram: {e}")
                         continue
                     state.update(fields)
         except OSError:
@@ -78,12 +78,12 @@ def main():
         threading.Thread(target=reader_thread, args=(state, zc), daemon=True).start()
 
         root = tk.Tk()
-        root.title("Consumo en vivo")
+        root.title("Live Consumption")
         root.geometry("500x420")
 
         kw_label = tk.Label(root, text="-- kW", font=("Segoe UI", 32))
         kw_label.pack(pady=10)
-        info_label = tk.Label(root, text="Buscando smart meter...", font=("Segoe UI", 11))
+        info_label = tk.Label(root, text="Searching for smart meter...", font=("Segoe UI", 11))
         info_label.pack()
 
         fig = Figure(figsize=(5, 2.5))
@@ -98,8 +98,8 @@ def main():
             if values:
                 kw_label.config(text=f"{values[-1]:.2f} kW")
                 stale = (time.time() - last_update) > 5.0
-                status = "Sin datos recientes" if stale else "En vivo"
-                info_label.config(text=f"{status} · {voltage:.1f} V · {kwh:.2f} kWh hoy")
+                status = "No recent data" if stale else "Live"
+                info_label.config(text=f"{status} · {voltage:.1f} V · {kwh:.2f} kWh today")
                 line.set_data(range(len(values)), values)
                 ax.set_xlim(0, max(len(values), 1))
                 canvas.draw_idle()
@@ -110,7 +110,7 @@ def main():
     except Exception as e:
         root = tk.Tk()
         root.withdraw()
-        messagebox.showerror("Consumo en vivo - Error", str(e))
+        messagebox.showerror("Live Consumption - Error", str(e))
         raise
 
 
