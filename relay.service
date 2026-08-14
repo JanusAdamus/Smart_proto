@@ -1,0 +1,14 @@
+[Unit]
+Description=Smart Meter Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/smartmeter/relay.py
+WorkingDirectory=/opt/smartmeter
+Restart=always
+RestartSec=3
+User=pi
+
+[Install]
+WantedBy=multi-user.target
