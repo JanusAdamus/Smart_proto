@@ -73,6 +73,7 @@ def serial_reader_loop(relay: RelayServer, serial_factory=None, retry_seconds=2.
             print("puerto serie perdido, reintentando")
         finally:
             ser.close()
+        time.sleep(retry_seconds)
 
 
 def main():
