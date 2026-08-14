@@ -40,7 +40,7 @@ class MeterSerialWriter:
                 continue
             with self.lock:
                 self.sent_count += 1
-                self.log.append(f"Enviado #{self.sent_count}: {self.state.kw:.3f} kW")
+                self.log.append(f"Sent #{self.sent_count}: {self.state.kw:.3f} kW")
             time.sleep(1.0 + random.uniform(-0.1, 0.1))
 
     def status(self):
@@ -62,14 +62,14 @@ def main():
         root = tk.Tk()
         root.title("Smart Meter Simulator")
         root.geometry("340x320")
-        status_label = tk.Label(root, text="Buscando puerto serie...", font=("Segoe UI", 12))
+        status_label = tk.Label(root, text="Searching for serial port...", font=("Segoe UI", 12))
         status_label.pack(pady=10)
         log_box = tk.Listbox(root, height=14, font=("Consolas", 9))
         log_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         def refresh():
             port, _count, log = writer.status()
-            status_label.config(text=f"Conectado en {port}" if port else "Buscando puerto serie...")
+            status_label.config(text=f"Connected on {port}" if port else "Searching for serial port...")
             log_box.delete(0, tk.END)
             for line in log:
                 log_box.insert(tk.END, line)

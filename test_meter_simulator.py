@@ -36,6 +36,6 @@ def test_meter_serial_writer_tracks_status_and_log():
             port, count, log = writer.status()
         assert count >= 1
         assert port == ser.port
-        assert log[-1].startswith(f"Enviado #{count}:")
+        assert log[-1].startswith(f"Sent #{count}:")
     finally:
         writer.stop()
