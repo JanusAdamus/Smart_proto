@@ -47,7 +47,7 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
             continue
         try:
             sock = socket.create_connection((ip, port), timeout=5.0)
-            sock.settimeout(None)
+            sock.settimeout(30.0)
         except OSError:
             time.sleep(3.0)
             continue
