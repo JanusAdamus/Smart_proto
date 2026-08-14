@@ -31,3 +31,15 @@ def test_dashboard_ignores_corrupt_telegram():
             pass
     values, _voltage, _kwh, _last_update = state.snapshot()
     assert values == []
+
+
+def test_dashboard_state_logs_received_messages():
+    state = DashboardState()
+    meter_state = MeterState(kw=1.8, voltage=231.0, kwh=99.0)
+    raw = generate_telegram(meter_state)
+    reader = TelegramReader()
+    for t in reader.feed(raw):
+        fields = parse_telegram(t)
+        state.update(fields)
+    log = state.log_snapshot()
+    assert log == ["Received #1: 1.800 kW"]

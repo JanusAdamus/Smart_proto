@@ -25,6 +25,8 @@ class DashboardState:
         self.voltage = 0.0
         self.kwh = 0.0
         self.last_update = 0.0
+        self.received_count = 0
+        self.received_log = deque(maxlen=20)
         self.lock = threading.Lock()
 
     def update(self, fields: dict):
@@ -33,10 +35,16 @@ class DashboardState:
             self.voltage = fields["voltage"]
             self.kwh = fields["kwh"]
             self.last_update = time.time()
+            self.received_count += 1
+            self.received_log.append(f"Received #{self.received_count}: {fields['kw']:.3f} kW")
 
     def snapshot(self):
         with self.lock:
             return list(self.kw), self.voltage, self.kwh, self.last_update
+
+    def log_snapshot(self):
+        with self.lock:
+            return list(self.received_log)
 
 
 def reader_thread(state: DashboardState, zc: Zeroconf):
@@ -86,6 +94,9 @@ def main():
         info_label = tk.Label(root, text="Searching for smart meter...", font=("Segoe UI", 11))
         info_label.pack()
 
+        log_box = tk.Listbox(root, height=8, font=("Consolas", 9))
+        log_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
         fig = Figure(figsize=(5, 2.5))
         ax = fig.add_subplot(111)
         line, = ax.plot([], [])
@@ -100,6 +111,9 @@ def main():
                 stale = (time.time() - last_update) > 5.0
                 status = "No recent data" if stale else "Live"
                 info_label.config(text=f"{status} · {voltage:.1f} V · {kwh:.2f} kWh today")
+                log_box.delete(0, tk.END)
+                for line_text in state.log_snapshot():
+                    log_box.insert(tk.END, line_text)
                 line.set_data(range(len(values)), values)
                 ax.set_xlim(0, max(len(values), 1))
                 canvas.draw_idle()
