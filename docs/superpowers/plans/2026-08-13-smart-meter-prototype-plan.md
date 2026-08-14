@@ -1001,15 +1001,18 @@ Write-Host "Listo: dist\meter_simulator.exe y dist\dashboard.exe"
 Run: `powershell -File build_windows.ps1`
 Expected: se generan `dist\meter_simulator.exe` y `dist\dashboard.exe` sin errores
 
-- [ ] **Step 3: Prueba manual end-to-end en la misma máquina (sin Pi todavía)**
+- [ ] **Step 3: Prueba manual end-to-end en la misma máquina (sin Pi física todavía)**
+
+El dashboard busca el servicio `_smartmeter._tcp.local.`, que solo `relay.py` anuncia (el simulador anuncia `_metersim._tcp.local.`, uno distinto) — sin algo corriendo `relay.py` de por medio, el dashboard nunca encontrará al simulador. `relay.py` (Task 4) no tiene ninguna dependencia de hardware de la Pi (son sockets + zeroconf puros), así que para esta prueba corre como un tercer proceso local con Python normal, sin necesitar la Pi física:
 
 1. Ejecutar `dist\meter_simulator.exe` — debe abrir una ventana "Simulando... 0 cliente(s) conectados". Si Windows Firewall pregunta, elegir "Permitir acceso".
-2. Ejecutar `dist\dashboard.exe` — debe mostrar "Buscando smart meter..." y, en unos segundos, cambiar a mostrar un número de kW en vivo y la gráfica moviéndose.
-3. Confirmar que la ventana del simulador ahora dice "1 cliente(s) conectados".
-4. Cerrar `meter_simulator.exe` — el dashboard debe mostrar "Sin datos recientes" en menos de ~6s sin crashear.
-5. Volver a abrir `meter_simulator.exe` — el dashboard debe recuperar datos en vivo sin reiniciarse.
+2. En una terminal, `python relay.py` — proceso sin ventana; déjalo corriendo (si Windows Firewall pregunta, permitir acceso).
+3. Ejecutar `dist\dashboard.exe` — debe mostrar "Buscando smart meter..." y, en unos segundos, cambiar a mostrar un número de kW en vivo y la gráfica moviéndose.
+4. Confirmar que la ventana del simulador ahora dice "1 cliente(s) conectados" (el cliente es `relay.py`).
+5. Cerrar `meter_simulator.exe` — el dashboard debe mostrar "Sin datos recientes" en menos de ~6s sin crashear, y `relay.py` no debe crashear (sigue reintentando encontrar al simulador).
+6. Volver a abrir `meter_simulator.exe` — el dashboard debe recuperar datos en vivo sin reiniciar ni `relay.py` ni `dashboard.exe`.
 
-Expected: los 5 puntos se cumplen. Si el paso 2 nunca encuentra el servicio, revisar que ambos procesos corran en la misma red/adaptador y que el firewall no esté bloqueando el tráfico UDP 5353 (mDNS) o el TCP 3000.
+Expected: los 6 puntos se cumplen. Si el paso 3 nunca encuentra el servicio, revisar que los tres procesos corran en la misma red/adaptador y que el firewall no esté bloqueando el tráfico UDP 5353 (mDNS) o los puertos TCP 3000/4000.
 
 - [ ] **Step 4: Commit**
 
