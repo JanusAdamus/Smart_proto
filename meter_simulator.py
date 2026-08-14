@@ -1,96 +1,86 @@
 import random
-import socket
 import threading
 import time
 import tkinter as tk
 from tkinter import messagebox
-
-from zeroconf import Zeroconf
+from collections import deque
 
 from dsmr import MeterState, generate_telegram
-from discovery import advertise_service
-
-PORT = 3000
+from serial_link import wait_and_open, BAUDRATE
 
 
-class MeterServer:
-    def __init__(self, port=PORT):
-        self.port = port
+class MeterSerialWriter:
+    def __init__(self, serial_factory=None, baudrate=BAUDRATE):
+        self.serial_factory = serial_factory or (lambda: wait_and_open(baudrate))
         self.state = MeterState()
-        self.clients = []
-        self.lock = threading.Lock()
         self.running = True
-        self.sock = None
+        self.ser = None
+        self.sent_count = 0
+        self.log = deque(maxlen=20)
+        self.lock = threading.Lock()
 
     def start(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(("0.0.0.0", self.port))
-        self.sock.listen(5)
-        threading.Thread(target=self._accept_loop, daemon=True).start()
-        threading.Thread(target=self._broadcast_loop, daemon=True).start()
+        threading.Thread(target=self._run, daemon=True).start()
 
-    def _accept_loop(self):
+    def _run(self):
         while self.running:
-            try:
-                conn, _addr = self.sock.accept()
-            except OSError:
-                break
-            conn.settimeout(5.0)
-            with self.lock:
-                self.clients.append(conn)
-
-    def _broadcast_loop(self):
-        while self.running:
+            if self.ser is None:
+                try:
+                    self.ser = self.serial_factory()
+                except OSError:
+                    time.sleep(2.0)
+                    continue
             self.state.tick(1.0)
             telegram = generate_telegram(self.state)
+            try:
+                self.ser.write(telegram)
+            except OSError:
+                self.ser.close()
+                self.ser = None
+                continue
             with self.lock:
-                dead = []
-                for conn in self.clients:
-                    try:
-                        conn.sendall(telegram)
-                    except OSError:
-                        dead.append(conn)
-                for conn in dead:
-                    self.clients.remove(conn)
+                self.sent_count += 1
+                self.log.append(f"Enviado #{self.sent_count}: {self.state.kw:.3f} kW")
             time.sleep(1.0 + random.uniform(-0.1, 0.1))
 
-    def client_count(self):
+    def status(self):
         with self.lock:
-            return len(self.clients)
+            port = self.ser.port if self.ser else None
+            return port, self.sent_count, list(self.log)
 
     def stop(self):
         self.running = False
-        if self.sock:
-            self.sock.close()
+        if self.ser:
+            self.ser.close()
 
 
 def main():
     try:
-        server = MeterServer()
-        server.start()
-
-        zc = Zeroconf()
-        info = advertise_service(zc, "_metersim._tcp.local.", "meter", PORT)
+        writer = MeterSerialWriter()
+        writer.start()
 
         root = tk.Tk()
         root.title("Smart Meter Simulator")
-        root.geometry("320x120")
-        label = tk.Label(root, text="Simulando...", font=("Segoe UI", 14))
-        label.pack(pady=20)
+        root.geometry("340x320")
+        status_label = tk.Label(root, text="Buscando puerto serie...", font=("Segoe UI", 12))
+        status_label.pack(pady=10)
+        log_box = tk.Listbox(root, height=14, font=("Consolas", 9))
+        log_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        def update_label():
-            label.config(text=f"Simulando... {server.client_count()} cliente(s) conectados")
-            root.after(1000, update_label)
+        def refresh():
+            port, _count, log = writer.status()
+            status_label.config(text=f"Conectado en {port}" if port else "Buscando puerto serie...")
+            log_box.delete(0, tk.END)
+            for line in log:
+                log_box.insert(tk.END, line)
+            root.after(1000, refresh)
 
         def on_close():
-            server.stop()
-            zc.unregister_service(info)
-            zc.close()
+            writer.stop()
             root.destroy()
 
         root.protocol("WM_DELETE_WINDOW", on_close)
-        update_label()
+        refresh()
         root.mainloop()
     except Exception as e:
         root = tk.Tk()

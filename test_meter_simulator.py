@@ -1,24 +1,41 @@
-import socket
 import time
 
-from meter_simulator import MeterServer
+import serial
+
+from meter_simulator import MeterSerialWriter
 from dsmr import TelegramReader, parse_telegram
 
 
-def test_meter_server_streams_valid_telegrams():
-    server = MeterServer(port=13000)
-    server.start()
+def test_meter_serial_writer_sends_valid_telegrams():
+    ser = serial.serial_for_url("loop://", timeout=1)
+    writer = MeterSerialWriter(serial_factory=lambda: ser)
+    writer.start()
     try:
-        client = socket.create_connection(("127.0.0.1", 13000), timeout=5.0)
         reader = TelegramReader()
         telegrams = []
         deadline = time.time() + 5.0
         while len(telegrams) < 1 and time.time() < deadline:
-            chunk = client.recv(4096)
+            chunk = ser.read(4096)
             telegrams.extend(reader.feed(chunk))
         assert len(telegrams) >= 1
         fields = parse_telegram(telegrams[0])
         assert 0.0 <= fields["kw"] <= 5.0
-        client.close()
     finally:
-        server.stop()
+        writer.stop()
+
+
+def test_meter_serial_writer_tracks_status_and_log():
+    ser = serial.serial_for_url("loop://", timeout=1)
+    writer = MeterSerialWriter(serial_factory=lambda: ser)
+    writer.start()
+    try:
+        deadline = time.time() + 5.0
+        port, count, log = writer.status()
+        while count < 1 and time.time() < deadline:
+            time.sleep(0.1)
+            port, count, log = writer.status()
+        assert count >= 1
+        assert port == ser.port
+        assert log[-1].startswith(f"Enviado #{count}:")
+    finally:
+        writer.stop()
