@@ -1,39 +1,36 @@
+# test_integration_e2e.py
 import socket
 import threading
 import time
 
+import serial
 from zeroconf import Zeroconf
 
-from meter_simulator import MeterServer
-from relay import RelayServer, connect_upstream
+from meter_simulator import MeterSerialWriter
+from relay import RelayServer, serial_reader_loop
 from discovery import ServiceWaiter, advertise_service
 from dsmr import TelegramReader, parse_telegram
 
-TEST_UPSTREAM = "_metersimtest._tcp.local."
 TEST_DOWNSTREAM = "_smartmetertest._tcp.local."
 
 
-def test_full_chain_simulator_relay_dashboard():
-    zc = Zeroconf()
-    meter = MeterServer(port=23000)
-    meter.start()
-    meter_info = advertise_service(zc, TEST_UPSTREAM, "meter-e2e", 23000)
+def test_full_chain_serial_meter_to_relay_to_dashboard():
+    shared_ser = serial.serial_for_url("loop://", timeout=1)
 
+    writer = MeterSerialWriter(serial_factory=lambda: shared_ser)
+    writer.start()
+
+    zc = Zeroconf()
     relay = RelayServer(port=24000)
     relay.start()
     relay_info = advertise_service(zc, TEST_DOWNSTREAM, "smartmeter-e2e", 24000)
 
-    def bridge():
-        waiter = ServiceWaiter(zc, TEST_UPSTREAM)
-        ip, port = waiter.wait(timeout=10.0)
-        upstream = connect_upstream(ip, port)
-        while True:
-            chunk = upstream.recv(4096)
-            if not chunk:
-                break
-            relay.broadcast(chunk)
-
-    threading.Thread(target=bridge, daemon=True).start()
+    threading.Thread(
+        target=serial_reader_loop,
+        args=(relay,),
+        kwargs={"serial_factory": lambda: shared_ser},
+        daemon=True,
+    ).start()
 
     try:
         waiter = ServiceWaiter(zc, TEST_DOWNSTREAM)
@@ -50,8 +47,7 @@ def test_full_chain_simulator_relay_dashboard():
         assert 0.0 <= fields["kw"] <= 5.0
         client.close()
     finally:
-        meter.stop()
+        writer.stop()
         relay.stop()
-        zc.unregister_service(meter_info)
         zc.unregister_service(relay_info)
         zc.close()
