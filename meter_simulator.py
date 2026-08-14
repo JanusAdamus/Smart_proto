@@ -35,6 +35,7 @@ class MeterServer:
                 conn, _addr = self.sock.accept()
             except OSError:
                 break
+            conn.settimeout(5.0)
             with self.lock:
                 self.clients.append(conn)
 
