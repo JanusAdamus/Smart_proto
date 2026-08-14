@@ -984,8 +984,10 @@ git commit -m "feat: dashboard en vivo (PC2)"
 - Create: `C:\Smart meter prototype\build_windows.ps1`
 
 **Interfaces:**
-- Consumes: `meter_simulator.py`, `dashboard.py`, `dsmr.py`, `discovery.py` (todo lo anterior)
-- Produces: `dist\meter_simulator.exe`, `dist\dashboard.exe`
+- Consumes: `meter_simulator.py`, `relay.py`, `dashboard.py`, `dsmr.py`, `discovery.py` (todo lo anterior)
+- Produces: `dist\meter_simulator.exe`, `dist\dashboard.exe`, `test_integration_e2e.py`
+
+Nota de alcance: este task lo ejecuta un subagente sin pantalla — no puede hacer doble clic en un .exe, ver una ventana de Tkinter, ni aceptar un diálogo de Windows Firewall. Por eso la verificación automatizada de este task es una prueba de integración a nivel de módulo (sockets + Zeroconf reales, sin GUI) que ejercita la cadena completa simulador→relay→cliente tipo-dashboard. El recorrido visual con los .exe reales (Steps manuales) lo hace el usuario después, a mano.
 
 - [ ] **Step 1: Crear `build_windows.ps1`**
 
@@ -1001,9 +1003,82 @@ Write-Host "Listo: dist\meter_simulator.exe y dist\dashboard.exe"
 Run: `powershell -File build_windows.ps1`
 Expected: se generan `dist\meter_simulator.exe` y `dist\dashboard.exe` sin errores
 
-- [ ] **Step 3: Prueba manual end-to-end en la misma máquina (sin Pi física todavía)**
+- [ ] **Step 3: Escribir y correr una prueba de integración automatizada de la cadena completa (sin GUI)**
 
-El dashboard busca el servicio `_smartmeter._tcp.local.`, que solo `relay.py` anuncia (el simulador anuncia `_metersim._tcp.local.`, uno distinto) — sin algo corriendo `relay.py` de por medio, el dashboard nunca encontrará al simulador. `relay.py` (Task 4) no tiene ninguna dependencia de hardware de la Pi (son sockets + zeroconf puros), así que para esta prueba corre como un tercer proceso local con Python normal, sin necesitar la Pi física:
+Esta prueba usa tipos de servicio Zeroconf y puertos exclusivos de test (`_metersimtest._tcp.local.` / `_smartmetertest._tcp.local.`, puertos 23000/24000) para no interferir con un `meter_simulator.exe`/`relay.py` real que el usuario pueda tener corriendo en la misma red en paralelo — nunca reutiliza `_metersim._tcp.local.`/`_smartmeter._tcp.local.` (los de producción).
+
+```python
+# test_integration_e2e.py
+import socket
+import threading
+import time
+
+from zeroconf import Zeroconf
+
+from meter_simulator import MeterServer
+from relay import RelayServer, connect_upstream
+from discovery import ServiceWaiter, advertise_service
+from dsmr import TelegramReader, parse_telegram
+
+TEST_UPSTREAM = "_metersimtest._tcp.local."
+TEST_DOWNSTREAM = "_smartmetertest._tcp.local."
+
+
+def test_full_chain_simulator_relay_dashboard():
+    zc = Zeroconf()
+    meter = MeterServer(port=23000)
+    meter.start()
+    meter_info = advertise_service(zc, TEST_UPSTREAM, "meter-e2e", 23000)
+
+    relay = RelayServer(port=24000)
+    relay.start()
+    relay_info = advertise_service(zc, TEST_DOWNSTREAM, "smartmeter-e2e", 24000)
+
+    def bridge():
+        waiter = ServiceWaiter(zc, TEST_UPSTREAM)
+        ip, port = waiter.wait(timeout=10.0)
+        upstream = connect_upstream(ip, port)
+        while True:
+            chunk = upstream.recv(4096)
+            if not chunk:
+                break
+            relay.broadcast(chunk)
+
+    threading.Thread(target=bridge, daemon=True).start()
+
+    try:
+        waiter = ServiceWaiter(zc, TEST_DOWNSTREAM)
+        ip, port = waiter.wait(timeout=10.0)
+        client = socket.create_connection((ip, port), timeout=10.0)
+        reader = TelegramReader()
+        telegrams = []
+        deadline = time.time() + 10.0
+        while len(telegrams) < 1 and time.time() < deadline:
+            chunk = client.recv(4096)
+            telegrams.extend(reader.feed(chunk))
+        assert len(telegrams) >= 1
+        fields = parse_telegram(telegrams[0])
+        assert 0.0 <= fields["kw"] <= 5.0
+        client.close()
+    finally:
+        meter.stop()
+        relay.stop()
+        zc.unregister_service(meter_info)
+        zc.unregister_service(relay_info)
+        zc.close()
+```
+
+Run: `pytest test_integration_e2e.py -v`
+Expected: PASS (1 test) — prueba que el simulador, el relay (pass-through, sin parsear) y un lector estilo-dashboard, conectados por Zeroconf real y sockets TCP reales, entregan un telegrama válido de punta a punta.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add build_windows.ps1 test_integration_e2e.py
+git commit -m "build: empaquetado PyInstaller + prueba de integracion end-to-end sin GUI"
+```
+
+- [ ] **Step 5: Checklist manual para el usuario (fuera del alcance del subagente, no se dispacha — lo hace el humano)**
 
 1. Ejecutar `dist\meter_simulator.exe` — debe abrir una ventana "Simulando... 0 cliente(s) conectados". Si Windows Firewall pregunta, elegir "Permitir acceso".
 2. En una terminal, `python relay.py` — proceso sin ventana; déjalo corriendo (si Windows Firewall pregunta, permitir acceso).
@@ -1012,14 +1087,7 @@ El dashboard busca el servicio `_smartmeter._tcp.local.`, que solo `relay.py` an
 5. Cerrar `meter_simulator.exe` — el dashboard debe mostrar "Sin datos recientes" en menos de ~6s sin crashear, y `relay.py` no debe crashear (sigue reintentando encontrar al simulador).
 6. Volver a abrir `meter_simulator.exe` — el dashboard debe recuperar datos en vivo sin reiniciar ni `relay.py` ni `dashboard.exe`.
 
-Expected: los 6 puntos se cumplen. Si el paso 3 nunca encuentra el servicio, revisar que los tres procesos corran en la misma red/adaptador y que el firewall no esté bloqueando el tráfico UDP 5353 (mDNS) o los puertos TCP 3000/4000.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add build_windows.ps1
-git commit -m "build: empaquetado PyInstaller para PC1 y PC2"
-```
+Si el paso 3 nunca encuentra el servicio, revisar que los tres procesos corran en la misma red/adaptador y que el firewall no esté bloqueando el tráfico UDP 5353 (mDNS) o los puertos TCP 3000/4000.
 
 ---
 
