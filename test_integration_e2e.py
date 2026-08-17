@@ -8,7 +8,7 @@ from zeroconf import Zeroconf
 
 from meter_simulator import MeterSerialWriter
 from relay import RelayServer, serial_reader_loop
-from discovery import ServiceWaiter, advertise_service
+from discovery import ServiceWaiter, advertise_service, connect_to_service
 from dsmr import TelegramReader, parse_telegram
 
 TEST_DOWNSTREAM = "_smartmetertest._tcp.local."
@@ -34,8 +34,8 @@ def test_full_chain_serial_meter_to_relay_to_dashboard():
 
     try:
         waiter = ServiceWaiter(zc, TEST_DOWNSTREAM)
-        ip, port = waiter.wait(timeout=10.0)
-        client = socket.create_connection((ip, port), timeout=10.0)
+        ips, port = waiter.wait(timeout=10.0)
+        client = connect_to_service(ips, port, timeout=2.0)
         reader = TelegramReader()
         telegrams = []
         deadline = time.time() + 10.0

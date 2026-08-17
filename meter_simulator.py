@@ -6,15 +6,16 @@ from tkinter import messagebox
 from collections import deque
 
 from dsmr import MeterState, generate_telegram
-from serial_link import wait_and_open, BAUDRATE
+from serial_link import open_first_port, port_still_present, BAUDRATE
 
 
 class MeterSerialWriter:
     def __init__(self, serial_factory=None, baudrate=BAUDRATE):
-        self.serial_factory = serial_factory or (lambda: wait_and_open(baudrate))
+        self.serial_factory = serial_factory or (lambda: open_first_port(baudrate))
         self.state = MeterState()
         self.running = True
         self.ser = None
+        self.watched = None
         self.sent_count = 0
         self.log = deque(maxlen=20)
         self.lock = threading.Lock()
@@ -24,27 +25,41 @@ class MeterSerialWriter:
 
     def _run(self):
         while self.running:
-            if self.ser is None:
-                try:
-                    self.ser = self.serial_factory()
-                except OSError:
-                    time.sleep(2.0)
-                    continue
-            self.state.tick(1.0)
-            telegram = generate_telegram(self.state)
+            self._tick()
+
+    def _drop(self):
+        try:
+            self.ser.close()
+        except OSError:
+            pass
+        self.ser = None
+        self.watched = None
+
+    def _tick(self):
+        if self.ser is None:
             try:
-                self.ser.write(telegram)
+                self.ser = self.serial_factory()
             except OSError:
-                try:
-                    self.ser.close()
-                except OSError:
-                    pass
-                self.ser = None
-                continue
-            with self.lock:
-                self.sent_count += 1
-                self.log.append(f"Sent #{self.sent_count}: {self.state.kw:.3f} kW")
-            time.sleep(1.0 + random.uniform(-0.1, 0.1))
+                time.sleep(2.0)
+                return
+            # Solo se vigila un puerto que el sistema realmente lista: los
+            # virtuales de los tests (loop://) nunca figuran y no se desenchufan.
+            self.watched = self.ser.port if port_still_present(self.ser.port) else None
+        elif self.watched and not port_still_present(self.watched):
+            print(f"{self.watched} unplugged, looking for another port")
+            self._drop()
+            return
+        self.state.tick(1.0)
+        telegram = generate_telegram(self.state)
+        try:
+            self.ser.write(telegram)
+        except OSError:
+            self._drop()
+            return
+        with self.lock:
+            self.sent_count += 1
+            self.log.append(f"Sent #{self.sent_count}: {self.state.kw:.3f} kW")
+        time.sleep(1.0 + random.uniform(-0.1, 0.1))
 
     def status(self):
         with self.lock:

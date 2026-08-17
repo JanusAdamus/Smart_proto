@@ -2,34 +2,59 @@
 import socket
 import threading
 
+import ifaddr
 from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf
 
 
-def get_local_ip() -> str:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except OSError:
-        return socket.gethostbyname(socket.gethostname())
-    finally:
-        s.close()
+def get_local_ips() -> list:
+    """IPv4 de todas las interfaces menos loopback.
+
+    No se puede preguntar "cual es MI ip" con un connect() a internet: sin ruta
+    por defecto (WiFi apagada, cable directo) eso falla y el fallback devuelve
+    127.0.1.1, que deja el servicio anunciado con una IP inalcanzable.
+    """
+    ips = [
+        i.ip
+        for a in ifaddr.get_adapters()
+        for i in a.ips
+        if i.is_IPv4 and not i.ip.startswith("127.")
+    ]
+    return ips or ["127.0.0.1"]
 
 
 def advertise_service(zc: Zeroconf, service_type: str, instance_name: str, port: int) -> ServiceInfo:
-    ip = get_local_ip()
+    ips = get_local_ips()
+    print(f"advertising {instance_name} on {ips} port {port}")
     info = ServiceInfo(
         service_type,
         f"{instance_name}.{service_type}",
-        addresses=[socket.inet_aton(ip)],
+        addresses=[socket.inet_aton(ip) for ip in ips],
         port=port,
     )
     zc.register_service(info)
     return info
 
 
+def connect_to_service(ips, port, timeout=5.0) -> socket.socket:
+    """Conecta a la primera IP anunciada que responda. Lanza OSError si ninguna."""
+    last = None
+    for ip in ips:
+        try:
+            sock = socket.create_connection((ip, port), timeout=timeout)
+            print(f"connected to {ip}:{port}")
+            return sock
+        except OSError as e:
+            print(f"cannot reach {ip}:{port}: {e}")
+            last = e
+    raise last or OSError("no addresses advertised")
+
+
 class ServiceWaiter:
-    """Bloquea hasta encontrar un servicio Zeroconf del tipo dado, retorna (ip, puerto)."""
+    """Bloquea hasta encontrar un servicio Zeroconf del tipo dado, retorna (ips, puerto).
+
+    Devuelve todas las IPs anunciadas: el que se conecta prueba una por una,
+    porque desde afuera no se sabe cual interfaz del servidor es alcanzable.
+    """
 
     def __init__(self, zc: Zeroconf, service_type: str):
         self.zc = zc
@@ -40,8 +65,10 @@ class ServiceWaiter:
     def add_service(self, zc, type_, name):
         info = zc.get_service_info(type_, name)
         if info and info.addresses and not self._found.is_set():
-            ip = socket.inet_ntoa(info.addresses[0])
-            self._address = (ip, info.port)
+            ips = [socket.inet_ntoa(a) for a in info.addresses if len(a) == 4]
+            if not ips:
+                return
+            self._address = (ips, info.port)
             self._found.set()
 
     def remove_service(self, zc, type_, name):

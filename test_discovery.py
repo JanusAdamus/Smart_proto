@@ -2,23 +2,15 @@
 import socket
 
 from zeroconf import Zeroconf
-from discovery import ServiceWaiter, get_local_ip
+from discovery import ServiceWaiter, get_local_ips
 
 
-def test_get_local_ip_falls_back_when_no_default_route(monkeypatch):
-    class FakeSocket:
-        def connect(self, addr):
-            raise OSError("network unreachable")
-
-        def getsockname(self):
-            raise AssertionError("should not be called after connect fails")
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(socket, "socket", lambda *a, **k: FakeSocket())
-    monkeypatch.setattr(socket, "gethostbyname", lambda host: "127.0.0.1")
-    assert get_local_ip() == "127.0.0.1"
+def test_get_local_ips_never_returns_loopback():
+    # Sin ruta por defecto el metodo viejo devolvia 127.0.1.1 y el servicio
+    # quedaba anunciado con una IP a la que nadie se puede conectar.
+    ips = get_local_ips()
+    assert ips
+    assert not any(ip.startswith("127.") for ip in ips)
 
 
 def test_service_waiter_times_out_when_nothing_found():
@@ -40,8 +32,9 @@ def test_advertise_and_discover_roundtrip():
         from discovery import advertise_service
         info = advertise_service(zc, "_testmeter._tcp.local.", "test", 12345)
         waiter = ServiceWaiter(zc, "_testmeter._tcp.local.")
-        ip, port = waiter.wait(timeout=5.0)
+        ips, port = waiter.wait(timeout=5.0)
         assert port == 12345
+        assert ips and not any(ip.startswith("127.") for ip in ips)
     finally:
         zc.unregister_service(info)
         zc.close()

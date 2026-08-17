@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from zeroconf import Zeroconf
 
 from dsmr import TelegramReader, parse_telegram, InvalidTelegram
-from discovery import ServiceWaiter
+from discovery import ServiceWaiter, connect_to_service
 
 SERVICE_TYPE = "_smartmeter._tcp.local."
 BUFFER_SIZE = 300
@@ -51,15 +51,16 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
     while True:
         waiter = ServiceWaiter(zc, SERVICE_TYPE)
         try:
-            ip, port = waiter.wait(timeout=3.0)
+            ips, port = waiter.wait(timeout=3.0)
         except TimeoutError:
+            print("no smart meter advertised yet")
             continue
         try:
-            sock = socket.create_connection((ip, port), timeout=5.0)
-            sock.settimeout(30.0)
+            sock = connect_to_service(ips, port, timeout=5.0)
         except OSError:
             time.sleep(3.0)
             continue
+        sock.settimeout(30.0)
         reader = TelegramReader()
         try:
             while True:
