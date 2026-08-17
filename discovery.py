@@ -1,6 +1,7 @@
 # discovery.py
 import socket
 import threading
+import time
 
 import ifaddr
 from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf
@@ -13,17 +14,23 @@ def get_local_ips() -> list:
     por defecto (WiFi apagada, cable directo) eso falla y el fallback devuelve
     127.0.1.1, que deja el servicio anunciado con una IP inalcanzable.
     """
-    ips = [
+    ips = {
         i.ip
         for a in ifaddr.get_adapters()
         for i in a.ips
         if i.is_IPv4 and not i.ip.startswith("127.")
-    ]
-    return ips or ["127.0.0.1"]
+    }
+    return sorted(ips) or ["127.0.0.1"]
 
 
-def advertise_service(zc: Zeroconf, service_type: str, instance_name: str, port: int) -> ServiceInfo:
-    ips = get_local_ips()
+def advertise_service(
+    zc: Zeroconf,
+    service_type: str,
+    instance_name: str,
+    port: int,
+    ips=None,
+) -> ServiceInfo:
+    ips = list(ips) if ips is not None else get_local_ips()
     print(f"advertising {instance_name} on {ips} port {port}")
     info = ServiceInfo(
         service_type,
@@ -33,6 +40,70 @@ def advertise_service(zc: Zeroconf, service_type: str, instance_name: str, port:
     )
     zc.register_service(info)
     return info
+
+
+def _close_advertisement(zc, info):
+    if zc is None:
+        return
+    if info is not None:
+        try:
+            zc.unregister_service(info)
+        except Exception as e:
+            print(f"could not unregister old advertisement: {e}")
+    try:
+        zc.close()
+    except Exception as e:
+        print(f"could not close old Zeroconf instance: {e}")
+
+
+def keep_advertised(
+    service_type: str,
+    instance_name: str,
+    port: int,
+    poll_seconds=5.0,
+    zeroconf_factory=Zeroconf,
+):
+    """Mantiene el servicio anunciado aunque aparezcan o desaparezcan interfaces.
+
+    El anuncio se arma con las IPs del momento. Al bootear, el servicio puede
+    ganarle a la interfaz: se anunciaria sin la IP del cable y nadie lo
+    encontraria hasta reiniciarlo a mano. Tambien cubre desenchufar el ethernet
+    y volver a enchufarlo sin tocar nada.
+
+    No basta registrar otro ServiceInfo: Zeroconf conserva las interfaces que
+    existian cuando se construyo. Por eso se recrea la instancia completa cada
+    vez que cambia la lista de direcciones.
+    """
+    zc = None
+    info = None
+    advertised_ips = None
+    try:
+        while True:
+            try:
+                current = get_local_ips()
+                if current != advertised_ips:
+                    if advertised_ips is not None:
+                        print(
+                            f"addresses changed {advertised_ips} -> {current}, "
+                            "recreating advertisement"
+                        )
+                    _close_advertisement(zc, info)
+                    zc = None
+                    info = None
+                    zc = zeroconf_factory()
+                    info = advertise_service(
+                        zc, service_type, instance_name, port, ips=current
+                    )
+                    advertised_ips = current
+            except Exception as e:
+                print(f"advertisement failed, retrying: {e}")
+                _close_advertisement(zc, info)
+                zc = None
+                info = None
+                advertised_ips = None
+            time.sleep(poll_seconds)
+    finally:
+        _close_advertisement(zc, info)
 
 
 def connect_to_service(ips, port, timeout=5.0) -> socket.socket:

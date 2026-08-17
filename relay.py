@@ -3,9 +3,7 @@ import socket
 import threading
 import time
 
-from zeroconf import Zeroconf
-
-from discovery import advertise_service
+from discovery import keep_advertised
 from serial_link import wait_and_open, BAUDRATE
 
 DOWNSTREAM_SERVICE = "_smartmeter._tcp.local."
@@ -78,11 +76,13 @@ def serial_reader_loop(relay: RelayServer, serial_factory=None, retry_seconds=2.
 
 def main():
     print("relay starting")
-    zc = Zeroconf()
-
     relay = RelayServer()
     relay.start()
-    advertise_service(zc, DOWNSTREAM_SERVICE, "smartmeter", DOWNSTREAM_PORT)
+    threading.Thread(
+        target=keep_advertised,
+        args=(DOWNSTREAM_SERVICE, "smartmeter", DOWNSTREAM_PORT),
+        daemon=True,
+    ).start()
 
     serial_reader_loop(relay)
 
