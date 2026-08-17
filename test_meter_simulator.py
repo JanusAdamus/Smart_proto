@@ -11,8 +11,15 @@ class _FakeSerial:
     """Puerto USB tal como se comporta en Windows: el write() sigue andando
     aunque lo desenchufes, porque los bytes se van al buffer del driver."""
 
-    def __init__(self, port):
+    def __init__(self, port, alive=True):
         self.port = port
+        self.alive = alive
+
+    @property
+    def in_waiting(self):
+        if not self.alive:
+            raise OSError("ClearCommError failed")
+        return 0
 
     def write(self, data):
         return len(data)
@@ -36,6 +43,21 @@ def test_writer_switches_port_when_unplugged_and_moved(monkeypatch):
     assert writer.ser is None, "no solto el puerto desenchufado"
     writer._tick()
     assert writer.ser.port == "COM5"
+
+
+def test_writer_drops_dead_handle_when_name_survives(monkeypatch):
+    # Windows suele reasignar el mismo COM al reconectar en otro USB: el nombre
+    # sigue en la lista, pero el handle viejo apunta a un dispositivo muerto.
+    monkeypatch.setattr(meter_simulator, "port_still_present", lambda p: True)
+    monkeypatch.setattr(meter_simulator.time, "sleep", lambda s: None)
+
+    ports = [_FakeSerial("COM3", alive=False), _FakeSerial("COM3", alive=True)]
+    writer = MeterSerialWriter(serial_factory=lambda: ports.pop(0))
+    writer._tick()
+    writer._tick()
+    assert writer.ser is None, "no detecto el handle muerto"
+    writer._tick()
+    assert writer.sent_count == 2
 
 
 def test_writer_does_not_drop_a_virtual_port(monkeypatch):

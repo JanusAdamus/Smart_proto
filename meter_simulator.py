@@ -11,7 +11,7 @@ from serial_link import open_first_port, port_still_present, BAUDRATE
 
 class MeterSerialWriter:
     def __init__(self, serial_factory=None, baudrate=BAUDRATE):
-        self.serial_factory = serial_factory or (lambda: open_first_port(baudrate))
+        self.serial_factory = serial_factory or (lambda: open_first_port(baudrate, on_log=self._note))
         self.state = MeterState()
         self.running = True
         self.ser = None
@@ -27,6 +27,10 @@ class MeterSerialWriter:
         while self.running:
             self._tick()
 
+    def _note(self, text):
+        with self.lock:
+            self.log.append(text)
+
     def _drop(self):
         try:
             self.ser.close()
@@ -34,6 +38,23 @@ class MeterSerialWriter:
             pass
         self.ser = None
         self.watched = None
+
+    def _port_alive(self) -> bool:
+        """Ninguno de los dos chequeos alcanza solo.
+
+        La lista del sistema no basta: al reconectarlo en otro USB, Windows
+        puede darle el mismo nombre COM y el puerto "sigue estando" aunque el
+        handle viejo apunte a un dispositivo muerto. El handle tampoco basta:
+        el write() no falla porque los bytes se van al buffer del driver, pero
+        in_waiting consulta el estado del dispositivo y eso si da error.
+        """
+        if self.watched and not port_still_present(self.watched):
+            return False
+        try:
+            self.ser.in_waiting
+        except OSError:
+            return False
+        return True
 
     def _tick(self):
         if self.ser is None:
@@ -45,8 +66,9 @@ class MeterSerialWriter:
             # Solo se vigila un puerto que el sistema realmente lista: los
             # virtuales de los tests (loop://) nunca figuran y no se desenchufan.
             self.watched = self.ser.port if port_still_present(self.ser.port) else None
-        elif self.watched and not port_still_present(self.watched):
-            print(f"{self.watched} unplugged, looking for another port")
+            self._note(f"Opened {self.ser.port}")
+        elif not self._port_alive():
+            self._note(f"{self.ser.port} unplugged, searching again")
             self._drop()
             return
         self.state.tick(1.0)

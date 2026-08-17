@@ -8,6 +8,27 @@ BAUDRATE = 115200
 TELEGRAM_START = b"/"
 
 
+def candidate_devices(prefer_usb=False) -> list:
+    """Puertos a probar. SMARTMETER_PORT saltea toda la eleccion.
+
+    prefer_usb solo para el generador, que no puede sondear: comports() en
+    Windows tambien lista puertos Bluetooth y virtuales que abren sin quejarse
+    y se tragan cualquier escritura, y los adaptadores USB reales son los
+    unicos con vid/pid. El receptor no lo usa: ahi los prueba todos porque la
+    sonda distingue sola, y en la Pi el medidor puede colgar del UART interno
+    (/dev/ttyS0), que no tiene vid y quedaria descartado.
+    """
+    forced = os.environ.get("SMARTMETER_PORT")
+    if forced:
+        return [forced]
+    ports = serial.tools.list_ports.comports()
+    if prefer_usb:
+        usb = [p.device for p in ports if p.vid is not None]
+        if usb:
+            return usb
+    return [p.device for p in ports]
+
+
 def carries_telegrams(ser, probe_seconds=3.0) -> bool:
     """True si el puerto emite un inicio de telegrama DSMR dentro del plazo."""
     deadline = time.time() + probe_seconds
@@ -26,8 +47,7 @@ def open_meter_port(baudrate=BAUDRATE, probe_seconds=3.0):
     SMARTMETER_PORT saltea la prueba cuando hace falta forzar uno a mano.
     """
     forced = os.environ.get("SMARTMETER_PORT")
-    devices = [forced] if forced else [p.device for p in serial.tools.list_ports.comports()]
-    for device in devices:
+    for device in candidate_devices():
         try:
             ser = serial.Serial(device, baudrate=baudrate, timeout=0.5)
         except OSError as e:
@@ -62,21 +82,29 @@ def port_still_present(port) -> bool:
     return any(p.device == port for p in serial.tools.list_ports.comports())
 
 
-def open_first_port(baudrate=BAUDRATE, poll_seconds=2.0):
-    """Lado emisor (el generador): abre el primer puerto que se deje.
+def open_first_port(baudrate=BAUDRATE, poll_seconds=2.0, on_log=print):
+    """Lado emisor (el generador): abre el primer puerto USB que se deje.
 
     Aca no se puede sondear: el generador escribe, no recibe, asi que no hay
     trafico entrante que delate cual es el correcto. SMARTMETER_PORT decide si
     la maquina tiene mas de un adaptador.
+
+    on_log recibe los fallos de apertura. Importa: el .exe se compila sin
+    consola, asi que un print aca no lo lee nadie y un puerto que se enumera
+    pero no abre (driver bloqueado, adaptador en uso) queda como un silencio.
     """
+    said = set()
     while True:
-        forced = os.environ.get("SMARTMETER_PORT")
-        devices = [forced] if forced else [p.device for p in serial.tools.list_ports.comports()]
+        devices = candidate_devices(prefer_usb=True)
+        if not devices and "none" not in said:
+            on_log("No serial ports found")
+            said.add("none")
         for device in devices:
             try:
                 ser = serial.Serial(device, baudrate=baudrate, timeout=5.0)
-                print(f"writing to {device}")
                 return ser
             except OSError as e:
-                print(f"cannot open {device}: {e}")
+                if device not in said:
+                    on_log(f"Cannot open {device}: {e}")
+                    said.add(device)
         time.sleep(poll_seconds)

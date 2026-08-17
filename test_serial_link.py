@@ -4,8 +4,9 @@ import serial_link
 
 
 class _FakePortInfo:
-    def __init__(self, device):
+    def __init__(self, device, vid=0x067B):
         self.device = device
+        self.vid = vid
 
 
 class _FakeSerial:
@@ -46,6 +47,31 @@ def _fake_bus(monkeypatch, ports: dict):
 
     monkeypatch.setattr(serial_link.serial, "Serial", fake_serial)
     return opened
+
+
+def test_candidate_devices_prefers_usb_over_bluetooth(monkeypatch):
+    # Los COM de Bluetooth abren bien y se tragan cualquier escritura sin
+    # quejarse: si se prueban primero, el generador se queda pegado ahi.
+    monkeypatch.delenv("SMARTMETER_PORT", raising=False)
+    monkeypatch.setattr(
+        serial_link.serial.tools.list_ports,
+        "comports",
+        lambda: [_FakePortInfo("COM3", vid=None), _FakePortInfo("COM7")],
+    )
+    assert serial_link.candidate_devices(prefer_usb=True) == ["COM7"]
+    # El receptor los prueba todos: en la Pi el medidor cuelga del UART interno,
+    # que no tiene vid y con prefer_usb quedaria descartado.
+    assert serial_link.candidate_devices() == ["COM3", "COM7"]
+
+
+def test_candidate_devices_falls_back_when_nothing_has_a_vid(monkeypatch):
+    monkeypatch.delenv("SMARTMETER_PORT", raising=False)
+    monkeypatch.setattr(
+        serial_link.serial.tools.list_ports,
+        "comports",
+        lambda: [_FakePortInfo("/dev/ttyS0", vid=None)],
+    )
+    assert serial_link.candidate_devices(prefer_usb=True) == ["/dev/ttyS0"]
 
 
 def test_open_meter_port_skips_silent_ports(monkeypatch):
@@ -97,6 +123,29 @@ def test_open_first_port_does_not_probe(monkeypatch):
     import serial_link
     _fake_bus(monkeypatch, {"/dev/ttyS0": b""})
     assert serial_link.open_first_port(poll_seconds=0).port == "/dev/ttyS0"
+
+
+def test_open_first_port_reports_a_port_that_will_not_open(monkeypatch):
+    # El caso PL2303 clonado: el driver lo enumera pero rechaza abrirlo. Sin
+    # este aviso el generador se queda en "Searching..." sin decir por que.
+    import serial_link
+    _fake_bus(monkeypatch, {})  # comports vacio -> Serial() falla para todo
+    monkeypatch.setattr(
+        serial_link.serial.tools.list_ports,
+        "comports",
+        lambda: [_FakePortInfo("COM4")],
+    )
+    lines = []
+
+    def stop_after_one_round(_seconds):
+        raise KeyboardInterrupt  # corta el reintento infinito
+
+    monkeypatch.setattr(serial_link.time, "sleep", stop_after_one_round)
+    try:
+        serial_link.open_first_port(poll_seconds=0, on_log=lines.append)
+    except KeyboardInterrupt:
+        pass
+    assert any("COM4" in line for line in lines)
 
 
 def test_carries_telegrams_true_on_real_loopback():
