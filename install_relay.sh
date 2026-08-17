@@ -4,6 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ETHERNET_INTERFACE="${SMARTMETER_ETHERNET_INTERFACE:-eth0}"
 ETHERNET_ADDRESS="${SMARTMETER_ETHERNET_ADDRESS:-192.168.50.1/24}"
+LINK_LOCAL_ADDRESS="${SMARTMETER_LINK_LOCAL_ADDRESS:-169.254.50.1/16}"
 CONNECTION_NAME="smartmeter-direct"
 
 sudo apt-get update
@@ -18,9 +19,9 @@ if ! ip link show "$ETHERNET_INTERFACE" >/dev/null 2>&1; then
     exit 1
 fi
 
-# Red directa plug-and-play. NetworkManager conserva 192.168.50.1 y levanta
-# DHCP en el cable: el receptor funciona tanto con 192.168.50.2 fija como en
-# modo automatico, incluso si el cable se conecta despues de arrancar la Pi.
+# Red directa plug-and-play. NetworkManager conserva la ruta normal y una ruta
+# link-local de respaldo. Si DHCP no responde, Windows se asigna solo una IP
+# 169.254.x.x/16 y aun puede alcanzar 169.254.50.1 sin ninguna configuracion.
 if sudo nmcli -t -f NAME connection show | grep -Fxq "$CONNECTION_NAME"; then
     sudo nmcli connection modify "$CONNECTION_NAME" \
         connection.interface-name "$ETHERNET_INTERFACE"
@@ -32,7 +33,7 @@ sudo nmcli connection modify "$CONNECTION_NAME" \
     connection.autoconnect yes \
     connection.autoconnect-priority 100 \
     ipv4.method shared \
-    ipv4.addresses "$ETHERNET_ADDRESS" \
+    ipv4.addresses "$ETHERNET_ADDRESS,$LINK_LOCAL_ADDRESS" \
     ipv4.never-default yes \
     ipv6.method disabled
 
@@ -55,6 +56,7 @@ fi
 
 sudo systemctl restart relay
 echo "Smart meter instalado en modo plug-and-play."
-echo "Pi: $ETHERNET_ADDRESS; receptor: DHCP automatico o 192.168.50.2/24."
+echo "Pi: $ETHERNET_ADDRESS (DHCP) y $LINK_LOCAL_ADDRESS (respaldo automatico)."
+echo "Receptor: Ethernet en modo automatico; no requiere IP manual."
 echo "Ver estado: systemctl status relay"
 echo "Ver datos:  journalctl -u relay -f"

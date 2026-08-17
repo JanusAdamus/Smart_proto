@@ -1,4 +1,5 @@
 import dashboard
+import pytest
 from dashboard import DashboardState
 from dsmr import TelegramReader, parse_telegram, InvalidTelegram, MeterState, generate_telegram
 
@@ -46,7 +47,7 @@ def test_dashboard_state_logs_received_messages():
     assert log == ["Received #1: 1.800 kW"]
 
 
-def test_dashboard_connects_to_fixed_pi(monkeypatch):
+def test_dashboard_uses_primary_pi_address_first(monkeypatch):
     expected_socket = object()
     attempts = []
 
@@ -56,13 +57,51 @@ def test_dashboard_connects_to_fixed_pi(monkeypatch):
 
     monkeypatch.setattr(dashboard.socket, "create_connection", fake_create_connection)
 
-    sock, endpoint = dashboard.connect_to_meter(
-        direct_host="192.168.50.1", direct_port=4000, timeout=1.0
-    )
+    endpoints = (("192.168.50.1", 4000), ("169.254.50.1", 4000))
+    sock, endpoint = dashboard.connect_to_meter(endpoints=endpoints, timeout=1.0)
 
     assert sock is expected_socket
     assert endpoint == "192.168.50.1:4000"
     assert attempts == [(('192.168.50.1', 4000), 1.0)]
+
+
+def test_dashboard_uses_link_local_when_dhcp_route_is_missing(monkeypatch):
+    expected_socket = object()
+    attempts = []
+
+    def fake_create_connection(address, timeout):
+        attempts.append((address, timeout))
+        if address[0] == "192.168.50.1":
+            raise OSError(10065, "unreachable host")
+        return expected_socket
+
+    monkeypatch.setattr(dashboard.socket, "create_connection", fake_create_connection)
+
+    endpoints = (("192.168.50.1", 4000), ("169.254.50.1", 4000))
+    sock, endpoint = dashboard.connect_to_meter(endpoints=endpoints, timeout=1.0)
+
+    assert sock is expected_socket
+    assert endpoint == "169.254.50.1:4000"
+    assert attempts == [
+        (("192.168.50.1", 4000), 1.0),
+        (("169.254.50.1", 4000), 1.0),
+    ]
+
+
+def test_dashboard_reports_both_unreachable_automatic_routes(monkeypatch):
+    def no_route(address, timeout):
+        assert timeout == 1.0
+        raise OSError(10065, f"unreachable {address[0]}")
+
+    monkeypatch.setattr(dashboard.socket, "create_connection", no_route)
+
+    endpoints = (("192.168.50.1", 4000), ("169.254.50.1", 4000))
+    with pytest.raises(OSError) as error:
+        dashboard.connect_to_meter(endpoints=endpoints, timeout=1.0)
+
+    message = str(error.value)
+    assert "192.168.50.1" in message
+    assert "169.254.50.1" in message
 
 
 def test_dashboard_has_no_zeroconf_runtime_dependency():

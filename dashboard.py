@@ -12,9 +12,11 @@ from matplotlib.figure import Figure
 
 from dsmr import TelegramReader, parse_telegram, InvalidTelegram
 
-APP_VERSION = "2.0 Direct"
-DIRECT_HOST = "192.168.50.1"
-DIRECT_PORT = 4000
+APP_VERSION = "3.0 Plug and Play"
+METER_ENDPOINTS = (
+    ("192.168.50.1", 4000),    # DHCP disponible
+    ("169.254.50.1", 4000),   # respaldo link-local/APIPA
+)
 BUFFER_SIZE = 300
 
 
@@ -26,7 +28,7 @@ class DashboardState:
         self.last_update = 0.0
         self.received_count = 0
         self.received_log = deque(maxlen=20)
-        self.connection_status = f"Connecting to {DIRECT_HOST}:{DIRECT_PORT}..."
+        self.connection_status = "Connecting to the Pi automatically..."
         self.lock = threading.Lock()
 
     def update(self, fields: dict):
@@ -56,23 +58,29 @@ class DashboardState:
 
 
 def connect_to_meter(
-    direct_host=DIRECT_HOST,
-    direct_port=DIRECT_PORT,
+    endpoints=METER_ENDPOINTS,
     timeout=2.0,
 ):
-    """Conecta al endpoint fijo creado por el instalador de la Pi.
+    """Conecta por DHCP o link-local, sin configurar el receptor.
 
-    La Pi entrega DHCP al receptor y siempre conserva 192.168.50.1. No se usa
-    multicast, DNS, gateway ni descubrimiento dependiente del perfil de red de
-    Windows.
+    La primera direccion funciona cuando la Pi entrega DHCP. La segunda cubre
+    computadoras que terminan con una direccion APIPA 169.254.x.x porque DHCP
+    no respondio. Ambas son rutas locales y no requieren gateway, DNS, mDNS,
+    privilegios de administrador ni cambios al adaptador de Windows.
     """
-    sock = socket.create_connection((direct_host, direct_port), timeout=timeout)
-    return sock, f"{direct_host}:{direct_port}"
+    errors = []
+    for host, port in endpoints:
+        try:
+            sock = socket.create_connection((host, port), timeout=timeout)
+            return sock, f"{host}:{port}"
+        except OSError as e:
+            errors.append(f"{host}: {e}")
+    raise OSError("Pi unreachable on automatic routes; " + "; ".join(errors))
 
 
 def reader_thread(state: DashboardState):
     while True:
-        state.set_connection_status(f"Connecting to {DIRECT_HOST}:{DIRECT_PORT}...")
+        state.set_connection_status("Connecting to the Pi automatically...")
         try:
             sock, endpoint = connect_to_meter()
         except OSError as e:
