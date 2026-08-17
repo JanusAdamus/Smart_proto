@@ -10,12 +10,9 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from zeroconf import Zeroconf
-
 from dsmr import TelegramReader, parse_telegram, InvalidTelegram
-from discovery import ServiceWaiter, connect_to_service
 
-SERVICE_TYPE = "_smartmeter._tcp.local."
+APP_VERSION = "2.0 Direct"
 DIRECT_HOST = "192.168.50.1"
 DIRECT_PORT = 4000
 BUFFER_SIZE = 300
@@ -59,36 +56,26 @@ class DashboardState:
 
 
 def connect_to_meter(
-    zc: Zeroconf,
     direct_host=DIRECT_HOST,
     direct_port=DIRECT_PORT,
     timeout=2.0,
 ):
-    """Conecta directo a la Pi; Zeroconf queda solo como respaldo.
+    """Conecta al endpoint fijo creado por el instalador de la Pi.
 
-    La red plug-and-play siempre asigna 192.168.50.1 a la Pi. Depender de
-    multicast como unica ruta hace que el dashboard falle con redes Public de
-    Windows o reglas de firewall, aunque el relay TCP sea perfectamente
-    alcanzable.
+    La Pi entrega DHCP al receptor y siempre conserva 192.168.50.1. No se usa
+    multicast, DNS, gateway ni descubrimiento dependiente del perfil de red de
+    Windows.
     """
-    try:
-        sock = socket.create_connection((direct_host, direct_port), timeout=timeout)
-        return sock, f"{direct_host}:{direct_port}"
-    except OSError as direct_error:
-        print(f"direct connection failed: {direct_error}; trying Zeroconf")
-
-    waiter = ServiceWaiter(zc, SERVICE_TYPE)
-    ips, port = waiter.wait(timeout=3.0)
-    sock = connect_to_service(ips, port, timeout=5.0)
-    return sock, f"discovered service on port {port}"
+    sock = socket.create_connection((direct_host, direct_port), timeout=timeout)
+    return sock, f"{direct_host}:{direct_port}"
 
 
-def reader_thread(state: DashboardState, zc: Zeroconf):
+def reader_thread(state: DashboardState):
     while True:
         state.set_connection_status(f"Connecting to {DIRECT_HOST}:{DIRECT_PORT}...")
         try:
-            sock, endpoint = connect_to_meter(zc)
-        except (OSError, TimeoutError) as e:
+            sock, endpoint = connect_to_meter()
+        except OSError as e:
             state.set_connection_status(f"Meter unavailable; retrying ({e})")
             time.sleep(2.0)
             continue
@@ -104,7 +91,7 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
                     try:
                         fields = parse_telegram(raw)
                     except InvalidTelegram as e:
-                        print(f"discarded telegram: {e}")
+                        state.set_connection_status(f"Invalid meter data: {e}")
                         continue
                     state.update(fields)
         except OSError:
@@ -116,12 +103,11 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
 
 def main():
     try:
-        zc = Zeroconf()
         state = DashboardState()
-        threading.Thread(target=reader_thread, args=(state, zc), daemon=True).start()
+        threading.Thread(target=reader_thread, args=(state,), daemon=True).start()
 
         root = tk.Tk()
-        root.title("Live Consumption")
+        root.title(f"Smart Meter Dashboard {APP_VERSION}")
         root.geometry("500x420")
 
         kw_label = tk.Label(root, text="-- kW", font=("Segoe UI", 32))

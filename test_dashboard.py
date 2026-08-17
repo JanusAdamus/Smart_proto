@@ -46,7 +46,7 @@ def test_dashboard_state_logs_received_messages():
     assert log == ["Received #1: 1.800 kW"]
 
 
-def test_dashboard_connects_to_fixed_pi_before_using_zeroconf(monkeypatch):
+def test_dashboard_connects_to_fixed_pi(monkeypatch):
     expected_socket = object()
     attempts = []
 
@@ -54,15 +54,10 @@ def test_dashboard_connects_to_fixed_pi_before_using_zeroconf(monkeypatch):
         attempts.append((address, timeout))
         return expected_socket
 
-    class ZeroconfMustNotRun:
-        def __init__(self, *_args, **_kwargs):
-            raise AssertionError("Zeroconf no debe usarse cuando la IP fija responde")
-
     monkeypatch.setattr(dashboard.socket, "create_connection", fake_create_connection)
-    monkeypatch.setattr(dashboard, "ServiceWaiter", ZeroconfMustNotRun)
 
     sock, endpoint = dashboard.connect_to_meter(
-        object(), direct_host="192.168.50.1", direct_port=4000, timeout=1.0
+        direct_host="192.168.50.1", direct_port=4000, timeout=1.0
     )
 
     assert sock is expected_socket
@@ -70,35 +65,29 @@ def test_dashboard_connects_to_fixed_pi_before_using_zeroconf(monkeypatch):
     assert attempts == [(('192.168.50.1', 4000), 1.0)]
 
 
-def test_dashboard_uses_zeroconf_when_fixed_pi_is_unreachable(monkeypatch):
-    expected_socket = object()
+def test_dashboard_has_no_zeroconf_runtime_dependency():
+    assert not hasattr(dashboard, "Zeroconf")
+    assert not hasattr(dashboard, "ServiceWaiter")
 
-    def direct_connection_fails(_address, timeout):
-        assert timeout == 1.0
-        raise OSError("fixed address unavailable")
 
-    class FakeWaiter:
-        def __init__(self, zc, service_type):
-            assert zc == "zc"
-            assert service_type == dashboard.SERVICE_TYPE
-
-        def wait(self, timeout):
-            assert timeout == 3.0
-            return ["10.0.0.20"], 4567
-
-    def fake_connect_to_service(ips, port, timeout):
-        assert ips == ["10.0.0.20"]
-        assert port == 4567
-        assert timeout == 5.0
-        return expected_socket
-
-    monkeypatch.setattr(dashboard.socket, "create_connection", direct_connection_fails)
-    monkeypatch.setattr(dashboard, "ServiceWaiter", FakeWaiter)
-    monkeypatch.setattr(dashboard, "connect_to_service", fake_connect_to_service)
-
-    sock, endpoint = dashboard.connect_to_meter(
-        "zc", direct_host="192.168.50.1", direct_port=4000, timeout=1.0
+def test_dashboard_accepts_real_telegram_split_after_first_byte():
+    raw = (
+        b"/ISK5\\2MT382-1000\r\n"
+        b"0-0:1.0.0(260817170123W)\r\n"
+        b"1-0:1.7.0(001.831*kW)\r\n"
+        b"1-0:1.8.1(003477.050*kWh)\r\n"
+        b"1-0:32.7.0(233.7*V)\r\n"
+        b"!E9DA\r\n"
     )
+    state = DashboardState()
+    reader = TelegramReader()
 
-    assert sock is expected_socket
-    assert endpoint == "discovered service on port 4567"
+    telegrams = reader.feed(raw[:1])
+    telegrams.extend(reader.feed(raw[1:]))
+    for telegram in telegrams:
+        state.update(parse_telegram(telegram))
+
+    values, voltage, kwh, _last_update = state.snapshot()
+    assert values == [1.831]
+    assert voltage == 233.7
+    assert kwh == 3477.05
