@@ -16,6 +16,8 @@ from dsmr import TelegramReader, parse_telegram, InvalidTelegram
 from discovery import ServiceWaiter, connect_to_service
 
 SERVICE_TYPE = "_smartmeter._tcp.local."
+DIRECT_HOST = "192.168.50.1"
+DIRECT_PORT = 4000
 BUFFER_SIZE = 300
 
 
@@ -27,6 +29,7 @@ class DashboardState:
         self.last_update = 0.0
         self.received_count = 0
         self.received_log = deque(maxlen=20)
+        self.connection_status = f"Connecting to {DIRECT_HOST}:{DIRECT_PORT}..."
         self.lock = threading.Lock()
 
     def update(self, fields: dict):
@@ -46,20 +49,50 @@ class DashboardState:
         with self.lock:
             return list(self.received_log)
 
+    def set_connection_status(self, text):
+        with self.lock:
+            self.connection_status = text
+
+    def connection_status_snapshot(self):
+        with self.lock:
+            return self.connection_status
+
+
+def connect_to_meter(
+    zc: Zeroconf,
+    direct_host=DIRECT_HOST,
+    direct_port=DIRECT_PORT,
+    timeout=2.0,
+):
+    """Conecta directo a la Pi; Zeroconf queda solo como respaldo.
+
+    La red plug-and-play siempre asigna 192.168.50.1 a la Pi. Depender de
+    multicast como unica ruta hace que el dashboard falle con redes Public de
+    Windows o reglas de firewall, aunque el relay TCP sea perfectamente
+    alcanzable.
+    """
+    try:
+        sock = socket.create_connection((direct_host, direct_port), timeout=timeout)
+        return sock, f"{direct_host}:{direct_port}"
+    except OSError as direct_error:
+        print(f"direct connection failed: {direct_error}; trying Zeroconf")
+
+    waiter = ServiceWaiter(zc, SERVICE_TYPE)
+    ips, port = waiter.wait(timeout=3.0)
+    sock = connect_to_service(ips, port, timeout=5.0)
+    return sock, f"discovered service on port {port}"
+
 
 def reader_thread(state: DashboardState, zc: Zeroconf):
     while True:
-        waiter = ServiceWaiter(zc, SERVICE_TYPE)
+        state.set_connection_status(f"Connecting to {DIRECT_HOST}:{DIRECT_PORT}...")
         try:
-            ips, port = waiter.wait(timeout=3.0)
-        except TimeoutError:
-            print("no smart meter advertised yet")
+            sock, endpoint = connect_to_meter(zc)
+        except (OSError, TimeoutError) as e:
+            state.set_connection_status(f"Meter unavailable; retrying ({e})")
+            time.sleep(2.0)
             continue
-        try:
-            sock = connect_to_service(ips, port, timeout=5.0)
-        except OSError:
-            time.sleep(3.0)
-            continue
+        state.set_connection_status(f"Connected to {endpoint}; waiting for data...")
         sock.settimeout(30.0)
         reader = TelegramReader()
         try:
@@ -78,6 +111,7 @@ def reader_thread(state: DashboardState, zc: Zeroconf):
             pass
         finally:
             sock.close()
+            state.set_connection_status("Connection lost; retrying...")
 
 
 def main():
@@ -118,6 +152,8 @@ def main():
                 line.set_data(range(len(values)), values)
                 ax.set_xlim(0, max(len(values), 1))
                 canvas.draw_idle()
+            else:
+                info_label.config(text=state.connection_status_snapshot())
             root.after(1000, refresh)
 
         refresh()
