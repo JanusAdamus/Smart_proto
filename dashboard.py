@@ -10,14 +10,43 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
+import ifaddr
+
 from dsmr import TelegramReader, parse_telegram, InvalidTelegram
 
-APP_VERSION = "3.0 Plug and Play"
-METER_ENDPOINTS = (
-    ("192.168.50.1", 4000),    # DHCP disponible
-    ("169.254.50.1", 4000),   # respaldo link-local/APIPA
+APP_VERSION = "3.1 Plug and Play"
+METER_PORT = 4000
+KNOWN_HOSTS = (
+    "192.168.50.1",   # subred que configura install_relay.sh
+    "169.254.50.1",   # respaldo link-local/APIPA
 )
 BUFFER_SIZE = 300
+
+
+def candidate_endpoints(port=METER_PORT):
+    """Direcciones donde puede estar la Pi, deducidas de lo que recibio Windows.
+
+    No alcanza con fijar 192.168.50.1. La Pi reparte DHCP, y si NetworkManager
+    no aplica la subred configurada usa la suya propia (10.42.0.x): el receptor
+    obtiene una IP perfectamente valida y aun asi ninguna direccion fija
+    responde, que es exactamente el WinError 10065 en una maquina recien
+    conectada. La Pi siempre es el .1 de la subred que reparte, asi que se
+    deduce de la direccion local en lugar de suponerla.
+    """
+    hosts = []
+    for adapter in ifaddr.get_adapters():
+        for ip in adapter.ips:
+            # 169.254.x.x es /16: el .1 del /24 no significa nada ahi y solo
+            # agrega esperas. Esa red la cubre la constante de KNOWN_HOSTS.
+            if not ip.is_IPv4 or ip.ip.startswith(("127.", "169.254.")):
+                continue
+            gateway = ip.ip.rsplit(".", 1)[0] + ".1"
+            if gateway != ip.ip and gateway not in hosts:
+                hosts.append(gateway)
+    for known in KNOWN_HOSTS:
+        if known not in hosts:
+            hosts.append(known)
+    return tuple((host, port) for host in hosts)
 
 
 class DashboardState:
@@ -57,17 +86,16 @@ class DashboardState:
             return self.connection_status
 
 
-def connect_to_meter(
-    endpoints=METER_ENDPOINTS,
-    timeout=2.0,
-):
-    """Conecta por DHCP o link-local, sin configurar el receptor.
+def connect_to_meter(endpoints=None, timeout=1.5):
+    """Conecta a la Pi sin configurar nada en el receptor.
 
-    La primera direccion funciona cuando la Pi entrega DHCP. La segunda cubre
-    computadoras que terminan con una direccion APIPA 169.254.x.x porque DHCP
-    no respondio. Ambas son rutas locales y no requieren gateway, DNS, mDNS,
-    privilegios de administrador ni cambios al adaptador de Windows.
+    Se prueban las direcciones deducidas de las interfaces locales y despues
+    las conocidas. Todas son rutas salientes dentro de la red local: no hacen
+    falta gateway, DNS, mDNS, reglas de firewall entrante ni permisos de
+    administrador.
     """
+    if endpoints is None:
+        endpoints = candidate_endpoints()
     errors = []
     for host, port in endpoints:
         try:
@@ -75,7 +103,7 @@ def connect_to_meter(
             return sock, f"{host}:{port}"
         except OSError as e:
             errors.append(f"{host}: {e}")
-    raise OSError("Pi unreachable on automatic routes; " + "; ".join(errors))
+    raise OSError("Pi unreachable; tried " + ", ".join(errors))
 
 
 def reader_thread(state: DashboardState):

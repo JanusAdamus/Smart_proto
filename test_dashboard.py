@@ -104,6 +104,42 @@ def test_dashboard_reports_both_unreachable_automatic_routes(monkeypatch):
     assert "169.254.50.1" in message
 
 
+class _FakeIP:
+    def __init__(self, ip, is_IPv4=True):
+        self.ip = ip
+        self.is_IPv4 = is_IPv4
+
+
+class _FakeAdapter:
+    def __init__(self, *ips):
+        self.ips = list(ips)
+
+
+def test_candidate_endpoints_derives_the_pi_from_the_dhcp_lease(monkeypatch):
+    # NetworkManager en modo shared usa su propia subred (10.42.0.x) si no
+    # aplica la configurada. El receptor recibe una IP valida y aun asi
+    # 192.168.50.1 no existe: ese es el WinError 10065 en maquinas nuevas.
+    monkeypatch.setattr(
+        dashboard.ifaddr,
+        "get_adapters",
+        lambda: [_FakeAdapter(_FakeIP("10.42.0.53"), _FakeIP("::1", is_IPv4=False))],
+    )
+    hosts = [host for host, _port in dashboard.candidate_endpoints()]
+    assert hosts[0] == "10.42.0.1", "no dedujo la Pi de la direccion recibida"
+    assert "192.168.50.1" in hosts and "169.254.50.1" in hosts
+
+
+def test_candidate_endpoints_skips_loopback_and_never_targets_itself(monkeypatch):
+    monkeypatch.setattr(
+        dashboard.ifaddr,
+        "get_adapters",
+        lambda: [_FakeAdapter(_FakeIP("127.0.0.1"), _FakeIP("192.168.50.1"))],
+    )
+    hosts = [host for host, _port in dashboard.candidate_endpoints()]
+    assert "127.0.0.1" not in hosts
+    assert hosts.count("192.168.50.1") == 1
+
+
 def test_dashboard_has_no_zeroconf_runtime_dependency():
     assert not hasattr(dashboard, "Zeroconf")
     assert not hasattr(dashboard, "ServiceWaiter")
