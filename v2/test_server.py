@@ -3,11 +3,13 @@ import socket
 import threading
 import time
 import urllib.request
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 
+import server
 from dsmr import MeterState, generate_telegram
-from server import MeterLink, extract, make_server
+from server import DashboardHandler, MeterLink, extract, make_server
 from store import Store
 
 
@@ -224,3 +226,66 @@ def test_ruta_desconocida_da_404(servidor):
     with pytest.raises(urllib.error.HTTPError) as error:
         pedir(servidor, "/no-existe")
     assert error.value.code == 404
+
+
+@pytest.mark.parametrize("error", [ConnectionResetError, BrokenPipeError])
+def test_handler_ignora_si_el_cliente_se_desconecta(monkeypatch, error):
+    def desconectar(_handler):
+        raise error
+
+    monkeypatch.setattr(BaseHTTPRequestHandler, "handle", desconectar)
+    DashboardHandler.handle(object.__new__(DashboardHandler))
+
+
+def test_handler_no_oculta_otros_errores(monkeypatch):
+    def fallar(_handler):
+        raise RuntimeError("fallo interno")
+
+    monkeypatch.setattr(BaseHTTPRequestHandler, "handle", fallar)
+    with pytest.raises(RuntimeError, match="fallo interno"):
+        DashboardHandler.handle(object.__new__(DashboardHandler))
+
+
+@pytest.mark.parametrize("error", [None, KeyboardInterrupt])
+def test_main_cierra_todos_los_recursos(monkeypatch, tmp_path, error):
+    eventos = []
+
+    class StoreDoble:
+        def __init__(self, path):
+            eventos.append(("store", path))
+
+        def close(self):
+            eventos.append("store.close")
+
+    class LinkDoble:
+        def __init__(self, store):
+            self.store = store
+            eventos.append("link")
+
+        def start(self):
+            eventos.append("link.start")
+
+        def stop(self):
+            eventos.append("link.stop")
+
+    class ServidorDoble:
+        def serve_forever(self):
+            eventos.append("serve_forever")
+            if error is not None:
+                raise error
+
+        def server_close(self):
+            eventos.append("server_close")
+
+    monkeypatch.setattr(server, "DB_PATH", str(tmp_path / "readings.db"))
+    monkeypatch.setattr(server, "Store", StoreDoble)
+    monkeypatch.setattr(server, "MeterLink", LinkDoble)
+    monkeypatch.setattr(server, "make_server", lambda link: ServidorDoble())
+
+    if error is None:
+        server.main()
+    else:
+        with pytest.raises(error):
+            server.main()
+
+    assert eventos[-3:] == ["server_close", "link.stop", "store.close"]

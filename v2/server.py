@@ -176,6 +176,12 @@ class MeterLink:
 class DashboardHandler(BaseHTTPRequestHandler):
     link = None  # lo inyecta make_server
 
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+
     def do_GET(self):
         route = urlparse(self.path)
         if route.path == "/":
@@ -234,10 +240,17 @@ def main():
     db_dir = os.path.dirname(DB_PATH)
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
-    link = MeterLink(Store(DB_PATH))
+    store = Store(DB_PATH)
+    link = MeterLink(store)
     link.start()
     print(f"dashboard en http://0.0.0.0:{HTTP_PORT}", flush=True)
-    make_server(link).serve_forever()
+    httpd = make_server(link)
+    try:
+        httpd.serve_forever()
+    finally:
+        httpd.server_close()
+        link.stop()
+        store.close()
 
 
 if __name__ == "__main__":
