@@ -29,7 +29,9 @@ sudo systemctl enable --now NetworkManager
 CON_PANTALLA=""
 if [ -d /etc/xdg/autostart ]; then
     CON_PANTALLA=1
-    sudo apt-get install -y chromium-browser
+    # El paquete cambio de nombre entre versiones de Raspberry Pi OS. Con
+    # set -e, pedir el que no existe aborta la instalacion entera.
+    sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
 fi
 
 if ! ip link show "$ETHERNET_INTERFACE" >/dev/null 2>&1; then
@@ -82,11 +84,19 @@ if [ -n "$CON_PANTALLA" ]; then
     # puerto es la diferencia entre encender la Pi y ver el dashboard, o no.
     sudo tee /opt/smartmeter/kiosk.sh >/dev/null <<'KIOSK'
 #!/bin/bash
+# El binario se llama chromium-browser o chromium segun la version del
+# sistema. Se resuelve al arrancar y no al instalar, porque una actualizacion
+# puede cambiarlo por debajo y el kiosco quedaria mudo sin decir por que.
+NAVEGADOR=$(command -v chromium-browser || command -v chromium)
+if [ -z "$NAVEGADOR" ]; then
+    echo "kiosk: no hay chromium instalado" >&2
+    exit 1
+fi
 for _ in $(seq 1 60); do
     if (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null; then break; fi
     sleep 1
 done
-exec chromium-browser --kiosk --noerrdialogs --disable-infobars \
+exec "$NAVEGADOR" --kiosk --noerrdialogs --disable-infobars \
     --check-for-update-interval=31536000 http://localhost:8080
 KIOSK
     sudo chmod +x /opt/smartmeter/kiosk.sh
