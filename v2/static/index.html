@@ -2,76 +2,189 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Meter P1</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark;
+          --bg:#12151a; --panel:#1b1f27; --ink:#e6e9ef; --dim:#8b95a5;
+          --ok:#4ade80; --bad:#f87171; --line:#2a3040; }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 16px; background: #12151a; color: #e6e9ef;
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
          font: 15px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
   h1 { font-size: 20px; margin: 0 0 4px; }
-  #status { font-size: 13px; margin-bottom: 16px; color: #9aa4b2; }
-  #status.live { color: #4ade80; }
-  #status.down { color: #f87171; }
+  #status { font-size: 13px; margin-bottom: 16px; color: var(--dim); }
+  #status.live { color: var(--ok); }
+  #status.down { color: var(--bad); }
   .grid { display: grid; gap: 10px;
           grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-  .card { background: #1b1f27; border-radius: 8px; padding: 12px; }
+  .card { background: var(--panel); border-radius: 8px; padding: 12px; }
   .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
-             color: #8b95a5; margin: 0 0 6px; font-weight: 600; }
+             color: var(--dim); margin: 0 0 6px; font-weight: 600; }
   .value { font: 600 24px/1 ui-monospace, Consolas, monospace; }
-  .unit { font-size: 13px; color: #8b95a5; margin-left: 3px; }
+  .unit { font-size: 13px; color: var(--dim); margin-left: 3px; }
   section { margin-top: 18px; }
-  canvas { width: 100%; height: 200px; background: #1b1f27; border-radius: 8px; }
-  pre { background: #1b1f27; border-radius: 8px; padding: 12px; overflow-x: auto;
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+           color: var(--dim); margin: 0 0 6px; font-weight: 600; }
+  canvas { width: 100%; height: 200px; background: var(--panel); border-radius: 8px;
+           display: block; }
+  pre { background: var(--panel); border-radius: 8px; padding: 12px; overflow: auto;
         font: 12px/1.45 ui-monospace, Consolas, monospace; color: #b9c2d0;
-        max-height: 260px; }
+        max-height: 260px; margin: 0; }
+
+  /* El modo compacto es para la pantalla SPI de 3,5" (480x320) montada sobre
+     los GPIO, y de paso para un telefono en vertical. Todo lo que sigue solo
+     existe por debajo de ese umbral: la vista de escritorio no se toca. */
+  #hero, #tabs { display: none; }
+
+  @media (max-width: 560px), (max-height: 430px) {
+    /* Altura fija y un solo panel con scroll. Sin esto la pagina crece hacia
+       abajo y en una pantalla de 320 px de alto no se ve ni la mitad. */
+    body { height: 100vh; padding: 8px; display: flex; flex-direction: column;
+           overflow: hidden; }
+    h1 { display: none; }
+
+    #hero { display: flex; align-items: baseline; gap: 6px; flex: none;
+            padding: 0 4px 4px; }
+    #heroValue { font: 700 34px/1 ui-monospace, Consolas, monospace; }
+    #heroUnit { font-size: 14px; color: var(--dim); }
+    #status { margin: 0 0 0 auto; font-size: 10px; text-align: right;
+              line-height: 1.2; }
+
+    /* Barra de pestañas: 44 px de alto es el minimo para acertarle con el
+       dedo, y esta pantalla es tactil resistiva, que perdona menos todavia
+       que una capacitiva. */
+    #tabs { display: flex; gap: 5px; flex: none; margin-bottom: 5px; }
+    #tabs button { flex: 1; min-height: 44px; border: 0; border-radius: 8px;
+                   background: var(--panel); color: var(--dim);
+                   font: 600 12px/1 system-ui, sans-serif; letter-spacing: .04em;
+                   text-transform: uppercase; -webkit-tap-highlight-color: transparent; }
+    #tabs button[aria-selected="true"] { background: #26303f; color: var(--ink); }
+
+    #panel { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin;
+             -webkit-overflow-scrolling: touch; }
+    section { margin: 0; }
+    section[hidden] { display: none; }
+    .grid { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 6px; }
+    .card { padding: 8px 10px; }
+    .card h2 { font-size: 10px; margin-bottom: 3px; }
+    .value { font-size: 20px; }
+    canvas { height: 104px; margin-top: 5px; }
+    pre { font-size: 10px; padding: 8px; max-height: none; }
+    #chartHint { font-size: 10px; color: var(--dim); text-align: right;
+                 padding: 2px 2px 0; }
+  }
 </style>
 </head>
 <body>
 <h1>Smart Meter P1</h1>
+
+<!-- Solo en la pantalla chica: la lectura que importa, siempre a la vista,
+     pase lo que pase con la pestaña elegida. -->
+<div id="hero">
+  <span id="heroValue">—</span><span id="heroUnit">kW</span>
+</div>
+
 <div id="status">Connecting…</div>
 
-<div class="grid" id="cards"></div>
+<nav id="tabs"></nav>
 
-<section>
-  <canvas id="chart" width="900" height="200"></canvas>
-</section>
+<div id="panel">
+  <section id="sec-now">
+    <div class="grid" data-group="now"></div>
+    <canvas id="chart" width="900" height="200"></canvas>
+    <div id="chartHint"></div>
+  </section>
 
-<section>
-  <h2 style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#8b95a5">
-    Latest raw telegram</h2>
-  <pre id="telegram">—</pre>
-</section>
+  <section id="sec-energy">
+    <div class="grid" data-group="energy"></div>
+  </section>
+
+  <section id="sec-phases">
+    <div class="grid" data-group="phases"></div>
+  </section>
+
+  <section id="sec-raw">
+    <p class="label">Latest raw telegram</p>
+    <pre id="telegram">—</pre>
+  </section>
+</div>
 
 <script>
-// Que tarjeta se dibuja para cada campo. Los campos que el medidor no informa
-// simplemente no aparecen: un medidor monofasico no manda L2 ni L3, y eso es
-// normal, no un error que haya que mostrar como un hueco.
+// Que tarjeta se dibuja para cada campo, y en que grupo cae. Los campos que el
+// medidor no informa simplemente no aparecen: un medidor monofasico no manda
+// L2 ni L3, y eso es normal, no un error que haya que mostrar como un hueco.
 const CARDS = [
-  ["power_in",      "Power drawn",     "kW",  3],
-  ["power_out",     "Power returned",  "kW",  3],
-  ["energy_in_t1",  "Energy T1 in",    "kWh", 3],
-  ["energy_in_t2",  "Energy T2 in",    "kWh", 3],
-  ["energy_out_t1", "Energy T1 out",   "kWh", 3],
-  ["energy_out_t2", "Energy T2 out",   "kWh", 3],
-  ["voltage_l1",    "Voltage L1",      "V",   1],
-  ["voltage_l2",    "Voltage L2",      "V",   1],
-  ["voltage_l3",    "Voltage L3",      "V",   1],
-  ["current_l1",    "Current L1",      "A",   0],
-  ["current_l2",    "Current L2",      "A",   0],
-  ["current_l3",    "Current L3",      "A",   0],
-  ["gas",           "Gas",             "m³",  3],
+  ["power_in",      "Power drawn",     "kW",  3, "now"],
+  ["power_out",     "Power returned",  "kW",  3, "now"],
+  ["energy_in_t1",  "Energy T1 in",    "kWh", 3, "energy"],
+  ["energy_in_t2",  "Energy T2 in",    "kWh", 3, "energy"],
+  ["energy_out_t1", "Energy T1 out",   "kWh", 3, "energy"],
+  ["energy_out_t2", "Energy T2 out",   "kWh", 3, "energy"],
+  ["gas",           "Gas",             "m³",  3, "energy"],
+  ["voltage_l1",    "Voltage L1",      "V",   1, "phases"],
+  ["voltage_l2",    "Voltage L2",      "V",   1, "phases"],
+  ["voltage_l3",    "Voltage L3",      "V",   1, "phases"],
+  ["current_l1",    "Current L1",      "A",   0, "phases"],
+  ["current_l2",    "Current L2",      "A",   0, "phases"],
+  ["current_l3",    "Current L3",      "A",   0, "phases"],
 ];
 
+const TABS = [
+  ["now",    "Now",     "sec-now"],
+  ["energy", "Energy",  "sec-energy"],
+  ["phases", "Phases",  "sec-phases"],
+  ["raw",    "Telegram","sec-raw"],
+];
+
+// Ventanas del grafico. Tocarlo las va rotando: en una pantalla sin teclado ni
+// raton es la unica forma de cambiar el rango, y en la grande no estorba.
+const WINDOWS = [15, 60, 360];
+let windowIndex = 0;
+
+const compact = () => window.matchMedia("(max-width: 560px), (max-height: 430px)").matches;
+
+// Las tarjetas se construyen una vez y despues solo se reescribe el numero.
+// Rehacer el innerHTML cada segundo repinta la pagina entera, y sobre una
+// pantalla SPI a unos pocos fps eso se ve como un parpadeo constante.
+const valueNodes = new Map();
+let builtFor = "";
+
+function buildCards(values) {
+  const present = CARDS.filter(([key]) => values[key] !== undefined && values[key] !== null);
+  const firma = present.map(([key]) => key).join(",");
+  if (firma === builtFor) return;
+  builtFor = firma;
+  valueNodes.clear();
+  for (const grid of document.querySelectorAll(".grid")) {
+    const group = grid.dataset.group;
+    grid.innerHTML = present
+      .filter(([, , , , g]) => g === group)
+      .map(([key, label, unit]) => `
+        <div class="card">
+          <h2>${label}</h2>
+          <div class="value"><span data-key="${key}">—</span><span class="unit">${unit}</span></div>
+        </div>`)
+      .join("");
+    // Una seccion sin ninguna tarjeta no tiene por que ocupar espacio.
+    grid.hidden = grid.children.length === 0;
+  }
+  for (const node of document.querySelectorAll("[data-key]")) {
+    valueNodes.set(node.dataset.key, node);
+  }
+}
+
 function renderCards(values) {
-  document.getElementById("cards").innerHTML = CARDS
-    .filter(([key]) => values[key] !== undefined && values[key] !== null)
-    .map(([key, label, unit, digits]) => `
-      <div class="card">
-        <h2>${label}</h2>
-        <div class="value">${values[key].toFixed(digits)}<span class="unit">${unit}</span></div>
-      </div>`)
-    .join("");
+  buildCards(values);
+  for (const [key, , , digits] of CARDS) {
+    const node = valueNodes.get(key);
+    if (!node) continue;
+    const texto = values[key].toFixed(digits);
+    if (node.textContent !== texto) node.textContent = texto;
+  }
+  const power = values.power_in;
+  const hero = document.getElementById("heroValue");
+  const texto = power === undefined || power === null ? "—" : power.toFixed(3);
+  if (hero.textContent !== texto) hero.textContent = texto;
 }
 
 function renderStatus(data) {
@@ -79,16 +192,55 @@ function renderStatus(data) {
   const when = data.ts ? new Date(data.ts * 1000).toLocaleTimeString() : "—";
   if (data.connected) {
     el.className = "live";
-    el.textContent = `Live · ${when} · ${data.received} telegrams · ${data.rejected} rejected`;
+    el.textContent = compact()
+      ? `Live · ${when}\n${data.received} tel · ${data.rejected} rej`
+      : `Live · ${when} · ${data.received} telegrams · ${data.rejected} rejected`;
   } else {
     el.className = "down";
-    el.textContent = `No link to the reader Pi · showing stored history · ` +
-                     `${data.received} telegrams · ${data.rejected} rejected`;
+    el.textContent = compact()
+      ? `No link\n${data.received} tel · ${data.rejected} rej`
+      : `No link to the reader Pi · showing stored history · ` +
+        `${data.received} telegrams · ${data.rejected} rejected`;
+  }
+  el.style.whiteSpace = "pre-line";
+}
+
+function buildTabs() {
+  const nav = document.getElementById("tabs");
+  nav.innerHTML = TABS
+    .map(([id, label]) => `<button type="button" data-tab="${id}" aria-selected="false">${label}</button>`)
+    .join("");
+  nav.addEventListener("click", event => {
+    const boton = event.target.closest("[data-tab]");
+    if (boton) selectTab(boton.dataset.tab);
+  });
+  selectTab("now");
+}
+
+function selectTab(id) {
+  for (const [tab, , section] of TABS) {
+    const activa = tab === id;
+    document.getElementById(section).hidden = compact() && !activa;
+    const boton = document.querySelector(`[data-tab="${tab}"]`);
+    if (boton) boton.setAttribute("aria-selected", String(activa));
+  }
+  // El canvas se dimensiona a partir de su ancho renderizado, y mientras la
+  // seccion esta oculta ese ancho es cero. Hay que redibujar al mostrarla.
+  if (id === "now") refreshChart();
+}
+
+function applyLayout() {
+  if (compact()) {
+    const activa = document.querySelector('[aria-selected="true"]');
+    selectTab(activa ? activa.dataset.tab : "now");
+  } else {
+    for (const [, , section] of TABS) document.getElementById(section).hidden = false;
   }
 }
 
 function drawChart(rows) {
   const canvas = document.getElementById("chart");
+  if (!canvas.clientWidth) return;
   // El canvas se estira por CSS; sin esto la curva sale borrosa en la pantalla
   // de la Pi, que tiene una relacion de pixeles distinta a la del navegador.
   const ratio = window.devicePixelRatio || 1;
@@ -96,7 +248,8 @@ function drawChart(rows) {
   canvas.height = canvas.clientHeight * ratio;
   const ctx = canvas.getContext("2d");
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  const w = canvas.clientWidth, h = canvas.clientHeight, pad = 24;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const pad = compact() ? 14 : 24;
   ctx.clearRect(0, 0, w, h);
 
   const points = rows.filter(r => r.power_in !== null);
@@ -123,9 +276,9 @@ function drawChart(rows) {
   ctx.stroke();
 
   ctx.fillStyle = "#8b95a5";
-  ctx.font = "11px ui-monospace, Consolas, monospace";
-  ctx.fillText(hi.toFixed(3) + " kW", pad, pad - 8);
-  ctx.fillText(lo.toFixed(3) + " kW", pad, h - 8);
+  ctx.font = (compact() ? "10px" : "11px") + " ui-monospace, Consolas, monospace";
+  ctx.fillText(hi.toFixed(3) + " kW", pad, pad - 3);
+  ctx.fillText(lo.toFixed(3) + " kW", pad, h - 4);
 }
 
 async function tick() {
@@ -133,7 +286,9 @@ async function tick() {
     const data = await (await fetch("/api/latest", { cache: "no-store" })).json();
     renderStatus(data);
     renderCards(data.values);
-    document.getElementById("telegram").textContent = data.telegram || "—";
+    const pre = document.getElementById("telegram");
+    const crudo = data.telegram || "—";
+    if (pre.textContent !== crudo) pre.textContent = crudo;
   } catch (error) {
     document.getElementById("status").className = "down";
     document.getElementById("status").textContent = "Dashboard unreachable";
@@ -141,11 +296,21 @@ async function tick() {
 }
 
 async function refreshChart() {
+  const minutes = WINDOWS[windowIndex];
+  document.getElementById("chartHint").textContent = `last ${minutes} min · tap to change`;
   try {
-    drawChart(await (await fetch("/api/history?minutes=15", { cache: "no-store" })).json());
+    drawChart(await (await fetch(`/api/history?minutes=${minutes}`, { cache: "no-store" })).json());
   } catch (error) { /* la grafica puede esperar al proximo ciclo */ }
 }
 
+document.getElementById("chart").addEventListener("click", () => {
+  windowIndex = (windowIndex + 1) % WINDOWS.length;
+  refreshChart();
+});
+window.addEventListener("resize", () => { applyLayout(); refreshChart(); });
+
+buildTabs();
+applyLayout();
 // Polling en vez de SSE: menos codigo en las dos puntas, sin conexiones largas
 // que limpiar, y se recupera solo cuando un telefono se va de la WiFi y vuelve.
 tick(); refreshChart();

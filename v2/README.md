@@ -151,6 +151,31 @@ compartido; `192.168.7.2` vive solo en el cable entre las dos Pis y desde el
 WiFi no se llega. Si no estás seguro, `ip -brief addr` en la Pi de pantalla las
 lista todas.
 
+## La pantalla de 3,5" sobre los GPIO
+
+El dashboard tiene dos diseños en un solo archivo. Por debajo de 560 px de
+ancho (o 430 px de alto) pasa al modo compacto, pensado para la TFT SPI de
+480×320 y de paso para un teléfono en vertical:
+
+- El consumo actual queda fijo arriba, se mire la pestaña que se mire.
+- Cuatro pestañas —Now, Energy, Phases, Telegram— de 44 px de alto, que es lo
+  mínimo para acertarle con el dedo en una táctil **resistiva**, que perdona
+  bastante menos que una capacitiva.
+- Tocar el gráfico rota la ventana entre 15, 60 y 360 minutos. Sin teclado ni
+  ratón es la única forma de cambiar el rango.
+- Los números se reescriben en su sitio en vez de rehacer el HTML. Sobre SPI el
+  refresco va a unos pocos fps, y repintar la página entera cada segundo se ve
+  como un parpadeo continuo.
+
+Con el driver GPIO puesto **el HDMI deja de dar señal**, así que conviene
+instalarlo cuando ya no haga falta el monitor grande. La pantalla es de 320×480
+nativos: para usarla apaisada hay que rotarla (el driver del fabricante trae el
+parámetro; si no, `display_rotate` en `config.txt`). Y la resistiva necesita
+calibración una vez.
+
+El resto del sistema no se entera: la pantalla es un asunto de la Pi de
+pantalla y del navegador, no del servidor.
+
 ## Sin medidor real: p1meter.dev
 
 [p1meter.dev](https://github.com/mijnverbruik/p1meter.dev) es un simulador de
