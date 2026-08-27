@@ -2,7 +2,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from dsmr import crc16_arc, format_timestamp, parse_timestamp
+from dsmr import (
+    InvalidTelegram,
+    as_number,
+    crc16_arc,
+    format_timestamp,
+    number,
+    parse_telegram,
+    parse_timestamp,
+)
 
 
 def test_crc16_arc_vector_conocido():
@@ -68,3 +76,130 @@ def test_is_summer_time_clava_los_bordes_del_cambio():
     assert format_timestamp(datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)) == "260329030000S"
     assert format_timestamp(datetime(2026, 10, 25, 0, 59, tzinfo=timezone.utc)) == "261025025900S"
     assert format_timestamp(datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)) == "261025020000W"
+
+
+def construir(cuerpo: str) -> bytes:
+    """Arma un telegrama valido calculando su CRC real.
+
+    El ejemplo de 6.13 del PDF viene partido por el salto de pagina, asi que
+    su CRC publicado (EF2F) no puede darse por valido sobre el texto
+    reconstruido. Se usa la estructura del estandar con el CRC recalculado;
+    la funcion de CRC ya quedo anclada aparte con un vector conocido.
+    """
+    crc = crc16_arc((cuerpo + "!").encode("ascii"))
+    return (cuerpo + f"!{crc:04X}\r\n").encode("ascii")
+
+
+# Estructura del ejemplo de 6.13 del estandar, con los tres bloques que mas
+# importa no perder: las tres fases, el registro de cortes y el gas M-Bus.
+CUERPO_EJEMPLO = (
+    "/ISk5\\2MT382-1000\r\n"
+    "\r\n"
+    "1-3:0.2.8(50)\r\n"
+    "0-0:1.0.0(101209113020W)\r\n"
+    "0-0:96.1.1(4B384547303034303436333935353037)\r\n"
+    "1-0:1.8.1(123456.789*kWh)\r\n"
+    "1-0:1.8.2(123456.789*kWh)\r\n"
+    "1-0:2.8.1(123456.789*kWh)\r\n"
+    "1-0:2.8.2(123456.789*kWh)\r\n"
+    "0-0:96.14.0(0002)\r\n"
+    "1-0:1.7.0(01.193*kW)\r\n"
+    "1-0:2.7.0(00.000*kW)\r\n"
+    "0-0:96.7.21(00004)\r\n"
+    "0-0:96.7.9(00002)\r\n"
+    "1-0:99.97.0(2)(0-0:96.7.19)(101208152415W)(0000000240*s)"
+    "(101208151004W)(0000000301*s)\r\n"
+    "1-0:32.32.0(00002)\r\n"
+    "0-0:96.13.0()\r\n"
+    "1-0:32.7.0(220.1*V)\r\n"
+    "1-0:52.7.0(220.2*V)\r\n"
+    "1-0:72.7.0(220.3*V)\r\n"
+    "1-0:31.7.0(001*A)\r\n"
+    "1-0:51.7.0(002*A)\r\n"
+    "1-0:71.7.0(003*A)\r\n"
+    "0-1:24.1.0(003)\r\n"
+    "0-1:96.1.0(3232323241424344313233343536373839)\r\n"
+    "0-1:24.2.1(101209112500W)(12785.123*m3)\r\n"
+)
+
+
+def test_parse_extrae_identificacion():
+    resultado = parse_telegram(construir(CUERPO_EJEMPLO))
+    assert resultado["ident"] == "ISk5\\2MT382-1000"
+
+
+def test_parse_extrae_las_tres_fases():
+    objetos = parse_telegram(construir(CUERPO_EJEMPLO))["objects"]
+    assert number(objetos, "1-0:32.7.0") == 220.1
+    assert number(objetos, "1-0:52.7.0") == 220.2
+    assert number(objetos, "1-0:72.7.0") == 220.3
+    assert number(objetos, "1-0:31.7.0") == 1.0
+
+
+def test_parse_conserva_el_registro_de_cortes_completo():
+    objetos = parse_telegram(construir(CUERPO_EJEMPLO))["objects"]
+    assert objetos["1-0:99.97.0"] == [
+        "2", "0-0:96.7.19",
+        "101208152415W", "0000000240*s",
+        "101208151004W", "0000000301*s",
+    ]
+
+
+def test_parse_extrae_el_gas_con_su_marca_de_captura():
+    objetos = parse_telegram(construir(CUERPO_EJEMPLO))["objects"]
+    assert objetos["0-1:24.2.1"] == ["101209112500W", "12785.123*m3"]
+    assert number(objetos, "0-1:24.2.1", index=1) == 12785.123
+
+
+def test_parse_acepta_valor_vacio():
+    objetos = parse_telegram(construir(CUERPO_EJEMPLO))["objects"]
+    assert objetos["0-0:96.13.0"] == [""]
+
+
+@pytest.mark.parametrize(
+    "identificacion",
+    ["/KFM5KAIFA-METER", "/Ene5\\XS210 ESMR 5.0", "/XMX5LGBBFG1009325446"],
+)
+def test_parse_no_asume_ningun_fabricante(identificacion):
+    """El prototipo 1 tenia /ISK5 hardcodeado y no leia ningun medidor real.
+
+    5.13 del estandar dice explicitamente que ni el conjunto ni el orden de
+    los codigos OBIS son fijos, y la identificacion varia por fabricante.
+    """
+    cuerpo = f"{identificacion}\r\n\r\n1-0:1.7.0(00.500*kW)\r\n"
+    resultado = parse_telegram(construir(cuerpo))
+    assert resultado["ident"] == identificacion[1:]
+    assert number(resultado["objects"], "1-0:1.7.0") == 0.5
+
+
+def test_parse_rechaza_crc_incorrecto():
+    valido = construir(CUERPO_EJEMPLO)
+    corrupto = valido[:-6] + b"0000\r\n"
+    with pytest.raises(InvalidTelegram, match="checksum"):
+        parse_telegram(corrupto)
+
+
+def test_parse_rechaza_telegrama_sin_marcador():
+    with pytest.raises(InvalidTelegram):
+        parse_telegram(b"/ISK5\r\n\r\n1-0:1.7.0(00.500*kW)\r\n")
+
+
+def test_parse_rechaza_lo_que_no_empieza_con_barra():
+    cuerpo = "basura previa\r\n\r\n1-0:1.7.0(00.500*kW)\r\n"
+    with pytest.raises(InvalidTelegram):
+        parse_telegram(construir(cuerpo))
+
+
+def test_as_number_reconoce_valor_con_unidad_y_sin_ella():
+    assert as_number("123456.789*kWh") == 123456.789
+    assert as_number("001*A") == 1.0
+    assert as_number("00002") == 2.0
+    assert as_number("101209112500W") is None
+    assert as_number("") is None
+
+
+def test_number_devuelve_none_para_campo_ausente():
+    """Un medidor monofasico no informa L2 ni L3, y eso es normal."""
+    objetos = parse_telegram(construir(CUERPO_EJEMPLO))["objects"]
+    assert number(objetos, "1-0:52.32.0") is None
+    assert number(objetos, "1-0:1.7.0", index=5) is None
