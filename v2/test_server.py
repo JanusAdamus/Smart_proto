@@ -114,3 +114,29 @@ def test_start_consume_por_tcp_y_stop_desconecta(link):
             assert esperar(lambda: not link.snapshot()["connected"])
         finally:
             conexion.close()
+
+
+def test_reconexion_descarta_el_fragmento_de_la_conexion_anterior(link):
+    telegrama = generate_telegram(MeterState())
+    with socket.socket() as lectora:
+        lectora.bind(("127.0.0.1", 0))
+        lectora.listen()
+        lectora.settimeout(2)
+        link.port = lectora.getsockname()[1]
+        link.start()
+
+        primera, _ = lectora.accept()
+        primera.sendall(telegrama[:len(telegrama) // 2])
+        primera.close()
+
+        segunda, _ = lectora.accept()
+        try:
+            segunda.sendall(telegrama)
+            assert esperar(
+                lambda: link.snapshot()["received"] + link.snapshot()["rejected"] == 1
+            )
+            estado = link.snapshot()
+            assert estado["received"] == 1
+            assert estado["rejected"] == 0
+        finally:
+            segunda.close()

@@ -137,6 +137,9 @@ class MeterLink:
                 conn.close()
                 break
             delay = 1.0
+            # Dos conexiones TCP no comparten continuidad: conservar una
+            # trama incompleta mezclaria bytes viejos con el primer telegrama.
+            self._reader = TelegramReader()
             with self._lock:
                 self._conn = conn
                 self._connected = True
