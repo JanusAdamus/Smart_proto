@@ -56,8 +56,16 @@ class Store:
                 self.conn.execute(sql, row)
 
     def history(self, minutes: int, now: int | None = None) -> list[dict]:
-        now = int(time.time()) if now is None else now
         with self._lock:
+            if now is None:
+                # La ventana se ancla en la ultima lectura guardada, no en el
+                # reloj del sistema: las filas llevan la marca del medidor y
+                # ese reloj no es el nuestro. p1meter.dev emite dos horas
+                # atrasado y un medidor real tampoco esta clavado al segundo.
+                # Mezclar los dos relojes dejaba la grafica en blanco con los
+                # datos entrando igual.
+                ultima = self.conn.execute("SELECT MAX(ts) AS ts FROM readings").fetchone()
+                now = ultima["ts"] if ultima["ts"] is not None else int(time.time())
             rows = self.conn.execute(
                 "SELECT * FROM readings WHERE ts >= ? ORDER BY ts",
                 (now - minutes * 60,),

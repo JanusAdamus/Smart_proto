@@ -92,3 +92,24 @@ def test_usa_wal(store):
 def test_las_columnas_declaradas_existen_en_la_tabla(store):
     reales = {fila[1] for fila in store.conn.execute("PRAGMA table_info(readings)")}
     assert set(COLUMNS) | {"ts"} == reales
+
+
+def test_la_ventana_se_ancla_en_la_ultima_lectura_y_no_en_el_reloj_del_sistema(store):
+    """Las filas llevan la marca del medidor, y ese reloj no es el nuestro.
+
+    p1meter.dev emite dos horas atrasado, y un medidor real tampoco esta
+    clavado al segundo. Anclar la ventana en time.time() dejaba la grafica en
+    blanco con los datos entrando igual.
+    """
+    import time
+
+    desfasado = int(time.time()) - 2 * 3600
+    store.save(desfasado - 30, {"power_in": 1.0})
+    store.save(desfasado, {"power_in": 2.0})
+    filas = store.history(minutes=60)
+    assert [f["power_in"] for f in filas] == [1.0, 2.0]
+
+
+def test_un_now_explicito_sigue_mandando(store):
+    store.save(1000, {"power_in": 1.0})
+    assert store.history(minutes=60, now=100000) == []
