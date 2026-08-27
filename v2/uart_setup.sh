@@ -29,5 +29,16 @@ preparar_uart() {
         sudo sed -i 's/console=serial0,[0-9]* //' "$cmdline"
     done
 
-    echo "UART preparado en $boot_config (aplica al reiniciar)."
+    # Los UART de los GPIO no siempre quedan en dialout: segun la imagen
+    # aparecen como root:root 0600, y ahi no alcanza con meter al usuario en
+    # dialout porque el dispositivo no es de dialout. Da "Permission denied"
+    # aunque `id` diga que el grupo esta. Un adaptador USB no tiene el
+    # problema, asi que se ve solo cuando el medidor cuelga de los GPIO.
+    sudo tee /etc/udev/rules.d/60-smartmeter-serial.rules >/dev/null <<'UDEV'
+KERNEL=="ttyS[0-9]*|ttyAMA[0-9]*", GROUP="dialout", MODE="0660"
+UDEV
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger --subsystem-match=tty
+
+    echo "UART preparado en $boot_config (el overlay aplica al reiniciar)."
 }
