@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=smartmeter
 WorkingDirectory=/opt/smartmeter
+Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/default/smartmeter
 ExecStart=/usr/bin/python3 /opt/smartmeter/server.py
 Restart=always
