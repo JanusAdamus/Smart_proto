@@ -1,8 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
-from dsmr import METER_TZ, crc16_arc, format_timestamp, parse_timestamp
+from dsmr import crc16_arc, format_timestamp, parse_timestamp
 
 
 def test_crc16_arc_vector_conocido():
@@ -23,7 +23,6 @@ def utc(anio, mes, dia, hora, minuto):
     que la prueba quiere verificar, y un numero magico mal calculado deja
     pasar el bug que buscaba atrapar.
     """
-    from datetime import timezone
     return int(datetime(anio, mes, dia, hora, minuto, tzinfo=timezone.utc).timestamp())
 
 
@@ -57,6 +56,15 @@ def test_parse_timestamp_rechaza_formato_invalido():
 
 
 def test_format_timestamp_ida_y_vuelta():
-    momento = datetime(2026, 7, 15, 12, 30, 0, tzinfo=METER_TZ)
+    momento = datetime(2026, 7, 15, 10, 30, tzinfo=timezone.utc)
     assert format_timestamp(momento) == "260715123000S"
     assert parse_timestamp(format_timestamp(momento)) == int(momento.timestamp())
+
+
+def test_is_summer_time_clava_los_bordes_del_cambio():
+    """En 2026 el cambio cae el 29 de marzo y el 25 de octubre, a las 01:00 UTC.
+    Un borde mal puesto desplaza una hora todos los telegramas de ese dia."""
+    assert format_timestamp(datetime(2026, 3, 29, 0, 59, tzinfo=timezone.utc)) == "260329015900W"
+    assert format_timestamp(datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)) == "260329030000S"
+    assert format_timestamp(datetime(2026, 10, 25, 0, 59, tzinfo=timezone.utc)) == "261025025900S"
+    assert format_timestamp(datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)) == "261025020000W"
