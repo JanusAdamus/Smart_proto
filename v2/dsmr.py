@@ -209,7 +209,12 @@ class MeterState:
         self.current = [2, 1, 3]
         self.phase_power = [0.5, 0.5, 0.5]
         self.gas = 12785.123
-        self.gas_captured_at = None
+        # Se fija de entrada en vez de quedar en None: si no, la marca de
+        # captura seria el instante de cada telegrama y avanzaria segundo a
+        # segundo con el valor de gas quieto, hasta la primera captura real a
+        # los 5 minutos. Un M-Bus nunca reporta eso: el valor y su marca
+        # cambian juntos.
+        self.gas_captured_at = meter_now()
         self._seconds_since_gas = 0.0
 
     def tick(self, dt_seconds=1.0, now=None):
@@ -244,7 +249,7 @@ class MeterState:
 def generate_telegram(state: MeterState, now=None) -> bytes:
     """Telegrama DSMR 5.0.2 completo, con la estructura de 6.13 del estandar."""
     now = now or meter_now()
-    gas_moment = state.gas_captured_at or now
+    gas_moment = state.gas_captured_at
     lines = [
         f"/{IDENT}",
         "",

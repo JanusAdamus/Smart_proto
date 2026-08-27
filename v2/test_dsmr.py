@@ -348,3 +348,21 @@ def test_el_gas_solo_avanza_cada_cinco_minutos():
     assert estado.gas == inicial
     estado.tick(1.0)
     assert estado.gas > inicial
+
+
+def test_la_marca_de_captura_del_gas_no_avanza_con_el_valor_quieto():
+    """Un M-Bus reporta el ultimo valor leido junto al momento en que lo leyo.
+
+    Marca que corre con valor congelado es imposible en un medidor real, y era
+    lo que pasaba durante los primeros 5 minutos de vida del estado.
+    """
+    estado = MeterState()
+    marcas = set()
+    for segundo in range(3):
+        estado.tick(1.0)
+        telegrama = generate_telegram(
+            estado, now=datetime(2026, 8, 27, 12, 0, segundo, tzinfo=timezone.utc)
+        )
+        valores = parse_telegram(telegrama)["objects"]["0-1:24.2.1"]
+        marcas.add(valores[0])
+    assert len(marcas) == 1, f"la marca de captura cambio sin cambiar el gas: {marcas}"
