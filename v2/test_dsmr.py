@@ -213,3 +213,61 @@ def test_parse_rechaza_bytes_no_ascii():
     """
     with pytest.raises(InvalidTelegram):
         parse_telegram(b"/ISK5\r\n\r\n1-0:1.7.0(00.\xff00*kW)\r\n!0000\r\n")
+
+
+from dsmr import MAX_BUFFER, TelegramReader
+
+
+def test_reader_entrega_un_telegrama_completo():
+    telegrama = construir(CUERPO_EJEMPLO)
+    lector = TelegramReader()
+    assert lector.feed(telegrama) == [telegrama]
+
+
+def test_reader_reensambla_un_telegrama_partido_en_trozos():
+    telegrama = construir(CUERPO_EJEMPLO)
+    lector = TelegramReader()
+    salida = []
+    for inicio in range(0, len(telegrama), 7):
+        salida.extend(lector.feed(telegrama[inicio:inicio + 7]))
+    assert salida == [telegrama]
+
+
+def test_reader_separa_dos_telegramas_pegados():
+    telegrama = construir(CUERPO_EJEMPLO)
+    lector = TelegramReader()
+    assert lector.feed(telegrama + telegrama) == [telegrama, telegrama]
+
+
+def test_reader_descarta_la_basura_previa():
+    telegrama = construir(CUERPO_EJEMPLO)
+    lector = TelegramReader()
+    assert lector.feed(b"\x00ruido de linea\xff" + telegrama) == [telegrama]
+
+
+def test_reader_no_asume_ningun_fabricante():
+    telegrama = construir("/KFM5KAIFA-METER\r\n\r\n1-0:1.7.0(00.500*kW)\r\n")
+    lector = TelegramReader()
+    assert lector.feed(telegrama) == [telegrama]
+
+
+def test_reader_acota_el_buffer_ante_basura_sin_fin():
+    """Sin tope, un cable con ruido hace crecer la memoria indefinidamente."""
+    lector = TelegramReader()
+    assert lector.feed(b"x" * (MAX_BUFFER * 2)) == []
+    assert lector.dropped_bytes == MAX_BUFFER * 2
+
+
+def test_reader_acota_un_telegrama_que_nunca_termina():
+    """Caso limite: la basura empieza con '/', asi que recortar hasta la
+    ultima barra no libera nada y el buffer creceria igual."""
+    lector = TelegramReader()
+    assert lector.feed(b"/" + b"x" * (MAX_BUFFER * 2)) == []
+    assert lector.dropped_bytes > 0
+
+
+def test_reader_sigue_funcionando_despues_de_desbordar():
+    telegrama = construir(CUERPO_EJEMPLO)
+    lector = TelegramReader()
+    lector.feed(b"x" * (MAX_BUFFER * 2))
+    assert lector.feed(telegrama) == [telegrama]

@@ -140,3 +140,43 @@ def number(objects: dict, code: str, index: int = 0):
     if not values or index >= len(values):
         return None
     return as_number(values[index])
+
+
+# Un telegrama con el mensaje de texto de 1024 caracteres y un registro largo
+# de cortes no pasa de unos pocos KB. 16 KB deja margen de sobra y sigue
+# acotando la memoria si el cable mete ruido.
+MAX_BUFFER = 16384
+
+# Desde una '/' hasta el '!' con sus cuatro hexadecimales. El identificador
+# del fabricante queda como comodin: es lo que rompia en v1.
+_TELEGRAM = re.compile(rb"/[^\r\n]*\r\n.*?\r\n![0-9A-Fa-f]{4}\r\n", re.DOTALL)
+
+
+class TelegramReader:
+    """Separa telegramas de un flujo de bytes que llega en trozos arbitrarios."""
+
+    def __init__(self, max_buffer=MAX_BUFFER):
+        self._buffer = b""
+        self._max = max_buffer
+        self.dropped_bytes = 0
+
+    def feed(self, chunk: bytes) -> list:
+        self._buffer += chunk
+        telegrams = []
+        while True:
+            match = _TELEGRAM.search(self._buffer)
+            if not match:
+                break
+            telegrams.append(match.group(0))
+            self._buffer = self._buffer[match.end():]
+        if len(self._buffer) > self._max:
+            start = self._buffer.rfind(b"/")
+            # start == 0 significa que lo acumulado ya empieza con '/' y no es
+            # un telegrama valido: recortar hasta ahi no liberaria nada.
+            if start <= 0:
+                self.dropped_bytes += len(self._buffer)
+                self._buffer = b""
+            else:
+                self.dropped_bytes += start
+                self._buffer = self._buffer[start:]
+        return telegrams
