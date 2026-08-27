@@ -271,3 +271,80 @@ def test_reader_sigue_funcionando_despues_de_desbordar():
     lector = TelegramReader()
     lector.feed(b"x" * (MAX_BUFFER * 2))
     assert lector.feed(telegrama) == [telegrama]
+
+
+from dsmr import MeterState, generate_telegram
+
+
+def test_telegrama_generado_pasa_su_propio_parser():
+    """La prueba que mas vale: si el generador y el parser coinciden, el
+    formato que sale es el mismo que sabemos leer de un medidor real."""
+    estado = MeterState()
+    estado.tick(1.0)
+    telegrama = generate_telegram(estado)
+    resultado = parse_telegram(telegrama)
+    assert resultado["ident"]
+    assert number(resultado["objects"], "1-0:1.7.0") is not None
+
+
+def test_telegrama_generado_pasa_el_enmarcador():
+    estado = MeterState()
+    telegrama = generate_telegram(estado)
+    assert TelegramReader().feed(telegrama) == [telegrama]
+
+
+def test_telegrama_declara_version_dsmr_5():
+    objetos = parse_telegram(generate_telegram(MeterState()))["objects"]
+    assert objetos["1-3:0.2.8"] == ["50"]
+
+
+def test_telegrama_trae_las_tres_fases():
+    objetos = parse_telegram(generate_telegram(MeterState()))["objects"]
+    for codigo in ("1-0:32.7.0", "1-0:52.7.0", "1-0:72.7.0",
+                   "1-0:31.7.0", "1-0:51.7.0", "1-0:71.7.0",
+                   "1-0:21.7.0", "1-0:41.7.0", "1-0:61.7.0"):
+        assert number(objetos, codigo) is not None, codigo
+
+
+def test_telegrama_trae_los_cuatro_registros_de_energia():
+    objetos = parse_telegram(generate_telegram(MeterState()))["objects"]
+    for codigo in ("1-0:1.8.1", "1-0:1.8.2", "1-0:2.8.1", "1-0:2.8.2"):
+        assert number(objetos, codigo) is not None, codigo
+
+
+def test_telegrama_trae_gas_con_marca_de_captura():
+    objetos = parse_telegram(generate_telegram(MeterState()))["objects"]
+    assert len(objetos["0-1:24.2.1"]) == 2
+    assert parse_timestamp(objetos["0-1:24.2.1"][0]) is not None
+    assert number(objetos, "0-1:24.2.1", index=1) is not None
+
+
+def test_la_energia_nunca_retrocede():
+    """Un contador de energia que baja es fisicamente imposible y romperia
+    cualquier calculo de consumo por diferencia."""
+    estado = MeterState()
+    anterior = estado.energy_in_t2
+    for _ in range(200):
+        estado.tick(1.0)
+        assert estado.energy_in_t2 >= anterior
+        anterior = estado.energy_in_t2
+
+
+def test_la_potencia_se_mantiene_en_un_rango_domestico():
+    estado = MeterState()
+    for _ in range(500):
+        estado.tick(1.0)
+        assert 0.0 <= estado.power_in <= 4.0
+
+
+def test_el_gas_solo_avanza_cada_cinco_minutos():
+    """Un medidor de gas por M-Bus reporta un valor nuevo cada 5 minutos, no
+    cada segundo. Simularlo continuo daria una demo que no se parece a la
+    realidad que vamos a leer."""
+    estado = MeterState()
+    inicial = estado.gas
+    for _ in range(299):
+        estado.tick(1.0)
+    assert estado.gas == inicial
+    estado.tick(1.0)
+    assert estado.gas > inicial

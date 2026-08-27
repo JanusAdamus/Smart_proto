@@ -4,6 +4,7 @@ Referencia: DSMR 5.0.2 P1 Companion Standard, Netbeheer Nederland, 2016-02-26.
 """
 
 import calendar
+import random
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -180,3 +181,109 @@ class TelegramReader:
                 self.dropped_bytes += start
                 self._buffer = self._buffer[start:]
         return telegrams
+
+
+IDENT = "ISk5\\2MT382-1000"
+EQUIPMENT_ID = "4B384547303034303436333935353037"
+GAS_EQUIPMENT_ID = "3232323241424344313233343536373839"
+GAS_INTERVAL_SECONDS = 300
+
+
+class MeterState:
+    """Estado de un medidor domestico trifasico, con evolucion creible.
+
+    Los valores son sinteticos, pero su forma importa: la energia solo
+    crece, la potencia se mueve como una caminata aleatoria acotada y el gas
+    avanza cada cinco minutos, que es como reporta un M-Bus real.
+    """
+
+    def __init__(self):
+        self.energy_in_t1 = 3477.050
+        self.energy_in_t2 = 4218.319
+        self.energy_out_t1 = 0.0
+        self.energy_out_t2 = 0.0
+        self.power_in = 1.5
+        self.power_out = 0.0
+        self.tariff = 2
+        self.voltage = [230.0, 229.4, 230.6]
+        self.current = [2, 1, 3]
+        self.phase_power = [0.5, 0.5, 0.5]
+        self.gas = 12785.123
+        self.gas_captured_at = None
+        self._seconds_since_gas = 0.0
+
+    def tick(self, dt_seconds=1.0, now=None):
+        now = now or meter_now()
+        self.power_in = min(3.5, max(0.2, self.power_in + random.gauss(0, 0.05)))
+        share = self.power_in / 3.0
+        self.phase_power = [
+            round(max(0.0, share + random.gauss(0, 0.03)), 3) for _ in range(3)
+        ]
+        self.voltage = [
+            round(min(235.0, max(225.0, v + random.gauss(0, 0.3))), 1)
+            for v in self.voltage
+        ]
+        # 230 V por fase; la corriente se deduce de la potencia de esa fase.
+        self.current = [
+            int(round(p * 1000.0 / v)) for p, v in zip(self.phase_power, self.voltage)
+        ]
+        # Solo acumula la tarifa activa, como un medidor real con doble tarifa.
+        delta = self.power_in * (dt_seconds / 3600.0)
+        if self.tariff == 1:
+            self.energy_in_t1 += delta
+        else:
+            self.energy_in_t2 += delta
+
+        self._seconds_since_gas += dt_seconds
+        if self._seconds_since_gas >= GAS_INTERVAL_SECONDS:
+            self._seconds_since_gas = 0.0
+            self.gas = round(self.gas + random.uniform(0.001, 0.02), 3)
+            self.gas_captured_at = now
+
+
+def generate_telegram(state: MeterState, now=None) -> bytes:
+    """Telegrama DSMR 5.0.2 completo, con la estructura de 6.13 del estandar."""
+    now = now or meter_now()
+    gas_moment = state.gas_captured_at or now
+    lines = [
+        f"/{IDENT}",
+        "",
+        "1-3:0.2.8(50)",
+        f"0-0:1.0.0({format_timestamp(now)})",
+        f"0-0:96.1.1({EQUIPMENT_ID})",
+        f"1-0:1.8.1({state.energy_in_t1:010.3f}*kWh)",
+        f"1-0:1.8.2({state.energy_in_t2:010.3f}*kWh)",
+        f"1-0:2.8.1({state.energy_out_t1:010.3f}*kWh)",
+        f"1-0:2.8.2({state.energy_out_t2:010.3f}*kWh)",
+        f"0-0:96.14.0({state.tariff:04d})",
+        f"1-0:1.7.0({state.power_in:06.3f}*kW)",
+        f"1-0:2.7.0({state.power_out:06.3f}*kW)",
+        "0-0:96.7.21(00004)",
+        "0-0:96.7.9(00002)",
+        "1-0:99.97.0(0)(0-0:96.7.19)",
+        "1-0:32.32.0(00002)",
+        "1-0:52.32.0(00001)",
+        "1-0:72.32.0(00000)",
+        "1-0:32.36.0(00000)",
+        "1-0:52.36.0(00003)",
+        "1-0:72.36.0(00000)",
+        "0-0:96.13.0()",
+        f"1-0:32.7.0({state.voltage[0]:05.1f}*V)",
+        f"1-0:52.7.0({state.voltage[1]:05.1f}*V)",
+        f"1-0:72.7.0({state.voltage[2]:05.1f}*V)",
+        f"1-0:31.7.0({state.current[0]:03d}*A)",
+        f"1-0:51.7.0({state.current[1]:03d}*A)",
+        f"1-0:71.7.0({state.current[2]:03d}*A)",
+        f"1-0:21.7.0({state.phase_power[0]:06.3f}*kW)",
+        f"1-0:41.7.0({state.phase_power[1]:06.3f}*kW)",
+        f"1-0:61.7.0({state.phase_power[2]:06.3f}*kW)",
+        "1-0:22.7.0(00.000*kW)",
+        "1-0:42.7.0(00.000*kW)",
+        "1-0:62.7.0(00.000*kW)",
+        "0-1:24.1.0(003)",
+        f"0-1:96.1.0({GAS_EQUIPMENT_ID})",
+        f"0-1:24.2.1({format_timestamp(gas_moment)})({state.gas:09.3f}*m3)",
+    ]
+    body = "\r\n".join(lines) + "\r\n"
+    crc = crc16_arc((body + "!").encode("ascii"))
+    return (body + f"!{crc:04X}\r\n").encode("ascii")
