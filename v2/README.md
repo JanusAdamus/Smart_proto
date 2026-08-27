@@ -59,6 +59,7 @@ Plan B y el Plan C.
 | Pi lectora | Raspberry Pi OS con NetworkManager, Python 3.11+, `pyserial` |
 | Pi de pantalla | Raspberry Pi OS con NetworkManager, Python 3.11+, Chromium |
 | PC simulador (Plan B) | Python 3.11+, `pyserial`, Tk (viene con Python) |
+| Pi Zero simulador (Plan B-UART) | Raspberry Pi OS Lite, Python 3.11+, `pyserial`. Sin Tk: corre headless |
 | PC simulador (Plan C) | Python 3.11+, `pyserial` (lo arrastra `relay.py`) |
 
 La Pi de pantalla no necesita `pyserial`: solo consume TCP.
@@ -96,6 +97,39 @@ sudo SMARTMETER_READER_HOST=192.168.7.9 bash install_display.sh
 
 o, sin reinstalar, editando `/etc/default/smartmeter` y reiniciando el servicio
 con `sudo systemctl restart display`.
+
+## Pi Zero como medidor, por UART
+
+```bash
+# En la Pi Zero
+bash install_simulator.sh
+sudo reboot
+```
+
+**Cableado, cruzado y con masa obligatoria.** Nada de 5 V ni 3V3 entre las dos:
+cada Pi con su propia alimentación.
+
+| Pi Zero (emite) | Pi lectora (lee) |
+|---|---|
+| GPIO14 / TXD — pin 8 | GPIO15 / RXD — pin 10 |
+| GND — pin 6 | GND — pin 6 |
+
+`install_simulator.sh` prepara el UART y deja el servicio `simulator` andando.
+`install_reader.sh` hace la misma preparación del otro lado, así que la lectora
+ya queda lista para recibir por GPIO además de por USB. Las dos necesitan
+reiniciar: los cambios de `config.txt` y `cmdline.txt` solo aplican al arrancar.
+
+Lo que esa preparación resuelve, y que si no muerde en silencio:
+
+- El getty de la consola serie pelea por el mismo puerto y mezcla el prompt de
+  login con los telegramas.
+- En la Zero W el Bluetooth se queda con el PL011 y `serial0` cae en el mini
+  UART, cuya velocidad sigue al reloj del core. A 115200 eso deriva y del otro
+  lado se ven bytes rotos intermitentes, que parecen ruido de cable.
+
+El simulador no puede sondear —escribe y nadie le contesta—, así que el puerto
+va fijo en `/etc/default/smartmeter` (`SMARTMETER_PORT=/dev/serial0`). La
+lectora sí sondea: prueba todos los puertos y se queda con el que manda un `/`.
 
 ## Conexión
 
@@ -144,7 +178,7 @@ implementación que no es nuestra.
 
 | Variable | Dónde | Por omisión | Para qué |
 |---|---|---|---|
-| `SMARTMETER_PORT` | Pi lectora, PC | — | Fuerza un puerto serie en vez de sondear |
+| `SMARTMETER_PORT` | Pi lectora, PC, Pi Zero | — | Fuerza un puerto serie en vez de sondear. En la Zero, `/dev/serial0` |
 | `SMARTMETER_ETHERNET_INTERFACE` | instaladores | `eth0` | Interfaz del cable entre Pis |
 | `SMARTMETER_ETHERNET_ADDRESS` | instaladores | `192.168.7.1/24` (lectora), `.2/24` (pantalla) | IP fija de ese cable |
 | `SMARTMETER_WIFI_INTERFACE` | `install_display.sh` | `wlan0` | Interfaz del AP |
@@ -176,6 +210,8 @@ cadena con un puerto serie de mentira y corre en cualquier plataforma.
 | El dashboard dice "No link to the reader Pi" | El cable Ethernet, y `systemctl status relay` en la lectora |
 | El contador de rechazados sube | Ruido en el cable serie, o un cable demasiado largo |
 | El relay no encuentra puerto | `journalctl -u relay -f` lista los puertos que probó |
+| Por UART no llega nada | ¿Reiniciaste las dos Pis? ¿TX contra RX (cruzado) y las masas unidas? `journalctl -u simulator -f` en la Zero |
+| Por UART llegan bytes rotos a ratos | El mini UART deriva: comprobá que `dtoverlay=disable-bt` quedó en `config.txt` y reiniciá |
 | La pantalla muestra un error en vez del dashboard | `systemctl status display` |
 | Llegan telegramas pero el gráfico está vacío | El medidor no informa ese campo; mirar el telegrama crudo al pie del dashboard |
 
