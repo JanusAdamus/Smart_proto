@@ -52,8 +52,8 @@ class Store:
             f"VALUES ({placeholders})"
         )
         with self._lock:
-            self.conn.execute(sql, row)
-            self.conn.commit()
+            with self.conn:
+                self.conn.execute(sql, row)
 
     def history(self, minutes: int, now: int | None = None) -> list[dict]:
         now = int(time.time()) if now is None else now
@@ -67,10 +67,10 @@ class Store:
     def prune(self, days: int = 7, now: int | None = None) -> int:
         now = int(time.time()) if now is None else now
         with self._lock:
-            cursor = self.conn.execute(
-                "DELETE FROM readings WHERE ts < ?", (now - days * 86400,)
-            )
-            self.conn.commit()
+            with self.conn:
+                cursor = self.conn.execute(
+                    "DELETE FROM readings WHERE ts < ?", (now - days * 86400,)
+                )
             return cursor.rowcount
 
     def close(self) -> None:

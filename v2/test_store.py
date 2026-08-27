@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from store import COLUMNS, Store
@@ -40,6 +42,21 @@ def test_una_marca_de_tiempo_repetida_sobrescribe(store):
     filas = store.history(minutes=60, now=1000)
     assert len(filas) == 1
     assert filas[0]["power_in"] == 2.0
+
+
+def test_save_revierte_la_transaccion_si_falla_commit(store):
+    def denegar_commit(action, parametro, _tabla, _base, _origen):
+        if action == sqlite3.SQLITE_TRANSACTION and parametro == "COMMIT":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    store.conn.set_authorizer(denegar_commit)
+
+    with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
+        store.save(1000, {"power_in": 1.0})
+
+    assert not store.conn.in_transaction
+    assert store.history(minutes=60, now=1000) == []
 
 
 def test_history_respeta_la_ventana(store):
