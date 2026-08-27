@@ -87,6 +87,13 @@ def parse_telegram(raw: bytes) -> dict:
     puede saber de antemano.
     """
     text = raw.decode("ascii", errors="replace")
+    # Un byte corrupto se vuelve � al decodificar, y el CRC se calcula
+    # re-codificando a ASCII, que no lo tolera. Rechazar aca es lo mismo que
+    # rechazar por CRC: el telegrama llego dañado y no se puede confiar en el.
+    # Importa porque el ruido de linea en un cable serie real es normal, y el
+    # consumidor tiene que poder descartar uno y seguir, no caerse.
+    if "�" in text:
+        raise InvalidTelegram("bytes no ASCII en el telegrama")
     body, marker, rest = text.rpartition("!")
     if not marker:
         raise InvalidTelegram("falta el marcador de checksum")

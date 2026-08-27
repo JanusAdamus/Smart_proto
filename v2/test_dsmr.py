@@ -203,3 +203,13 @@ def test_number_devuelve_none_para_campo_ausente():
     objetos = parse_telegram(construir(CUERPO_EJEMPLO))["objects"]
     assert number(objetos, "1-0:52.32.0") is None
     assert number(objetos, "1-0:1.7.0", index=5) is None
+
+
+def test_parse_rechaza_bytes_no_ascii():
+    """Un byte de ruido en el cable no debe tumbar al consumidor.
+
+    Tiene que salir por el mismo camino que un CRC que no coincide: telegrama
+    descartado, contador que sube, servicio que sigue vivo.
+    """
+    with pytest.raises(InvalidTelegram):
+        parse_telegram(b"/ISK5\r\n\r\n1-0:1.7.0(00.\xff00*kW)\r\n!0000\r\n")
