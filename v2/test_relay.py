@@ -111,3 +111,29 @@ def test_serial_reader_loop_publica_lo_que_lee():
     finally:
         relay.broadcast = original
         relay.stop()
+
+
+def test_broadcast_no_retiene_el_lock_mientras_envia():
+    """Un cliente lento no debe frenar a los demas ni al hilo lector.
+
+    Si el lock sigue tomado durante el sendall, un cliente atascado bloquea la
+    entrega al resto y detiene la lectura del puerto serie hasta que venza su
+    timeout. Se comprueba sobre el lock y no llenando buffers de socket, que
+    seria lento y dependiente de la plataforma.
+    """
+    relay = RelayServer(port=puerto_libre())
+    libre = []
+
+    class ClienteEspia:
+        def sendall(self, _data):
+            tomado = relay.lock.acquire(blocking=False)
+            libre.append(tomado)
+            if tomado:
+                relay.lock.release()
+
+        def close(self):
+            pass
+
+    relay.clients.append(ClienteEspia())
+    relay.broadcast(b"x")
+    assert libre == [True], "broadcast retuvo el lock mientras enviaba"

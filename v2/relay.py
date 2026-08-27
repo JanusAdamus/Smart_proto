@@ -37,20 +37,34 @@ class RelayServer:
                 conn, _addr = self.sock.accept()
             except OSError:
                 break
-            conn.settimeout(5.0)
+            # Un segundo alcanza de sobra: el flujo es de un telegrama de ~1 KB
+            # por segundo sobre un cable Ethernet directo. Un cliente que no
+            # acepta eso en un segundo esta atascado, y conviene descartarlo
+            # rapido antes que frenar al hilo lector. socket.timeout hereda de
+            # OSError, asi que el except de broadcast ya lo trata como muerto.
+            conn.settimeout(1.0)
             with self.lock:
                 self.clients.append(conn)
 
     def broadcast(self, data: bytes):
+        # Se copia la lista bajo el lock y se envia fuera. Sostener el lock
+        # durante el sendall dejaba que un cliente lento frenara la entrega a
+        # los demas y, peor, bloqueara al hilo que lee el puerto serie.
+        # Enviar fuera del lock es seguro porque el unico llamante es ese hilo.
         with self.lock:
-            dead = []
-            for conn in self.clients:
-                try:
-                    conn.sendall(data)
-                except OSError:
-                    dead.append(conn)
+            clients = list(self.clients)
+        dead = []
+        for conn in clients:
+            try:
+                conn.sendall(data)
+            except OSError:
+                dead.append(conn)
+        if dead:
+            with self.lock:
+                for conn in dead:
+                    if conn in self.clients:
+                        self.clients.remove(conn)
             for conn in dead:
-                self.clients.remove(conn)
                 conn.close()
 
     def stop(self):
