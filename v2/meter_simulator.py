@@ -1,12 +1,20 @@
 import random
+import sys
 import threading
 import time
-import tkinter as tk
-from tkinter import messagebox
 from collections import deque
 
 from dsmr import MeterState, generate_telegram
 from serial_link import open_all_ports, port_still_present, BAUDRATE
+
+# Una Pi Zero sin escritorio no trae python3-tk, y ahi el simulador corre
+# headless contra el UART. Importar tkinter arriba dejaba el modo que no
+# necesita ventana rehen del paquete que instala la ventana.
+try:
+    import tkinter as tk
+    from tkinter import messagebox
+except ImportError:
+    tk = None
 
 APP_VERSION = "5.0 P1"
 
@@ -209,7 +217,39 @@ class SmartMeterGeneratorUI:
         self.root.after(1000, self._refresh)
 
 
+def run_headless():
+    """Modo Pi Zero: sin ventana, el estado va al journal.
+
+    Un servicio no tiene quien mire una etiqueta de tkinter, asi que el log de
+    envio es la unica forma de saber si el UART esta escupiendo algo.
+    """
+    writer = MeterSerialWriter()
+    writer.start()
+    print("simulador headless: buscando puerto serie", flush=True)
+    visto = None
+    try:
+        while True:
+            time.sleep(5.0)
+            ports, enviados, _log = writer.status()
+            estado = (tuple(ports), enviados // 60)
+            if estado != visto:
+                visto = estado
+                destino = ", ".join(ports) if ports else "ningun puerto"
+                lectura = writer.reading_snapshot()
+                print(
+                    f"{destino}: {enviados} telegramas, "
+                    f"{lectura['power_in']:.3f} kW",
+                    flush=True,
+                )
+    except KeyboardInterrupt:
+        pass
+    finally:
+        writer.stop()
+
+
 def main():
+    if "--headless" in sys.argv or tk is None:
+        return run_headless()
     writer = None
     try:
         writer = MeterSerialWriter()

@@ -34,6 +34,9 @@ Plan C:  [PC con p1_source.py] --------------------------> TCP 4000, bytes crudo
 - **Plan B** — una computadora hace de medidor por USB-serie: `meter_simulator.py`
   escribe telegramas en el puerto, la Pi lectora los lee como si vinieran del
   medidor. Necesita dos adaptadores USB-serie y un cable entre ellos.
+- **Plan B-UART** — una Pi Zero hace de medidor y le habla a la lectora por el
+  UART de los GPIO, sin adaptadores USB de por medio. Es el Plan B con la
+  computadora reemplazada por una Pi: `meter_simulator.py --headless`.
 - **Plan C** — una computadora hace de medidor **y** de Pi lectora a la vez:
   `p1_source.py` sirve el flujo directamente por TCP 4000, goteando el
   telegrama a 115200 baudios como haría el cable. Sin cables ni adaptadores; la

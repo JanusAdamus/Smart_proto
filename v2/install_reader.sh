@@ -6,9 +6,16 @@ ETHERNET_INTERFACE="${SMARTMETER_ETHERNET_INTERFACE:-eth0}"
 ETHERNET_ADDRESS="${SMARTMETER_ETHERNET_ADDRESS:-192.168.7.1/24}"
 CONNECTION_NAME="smartmeter-direct"
 
+source "$SCRIPT_DIR/uart_setup.sh"
+
 sudo apt-get update
 sudo apt-get install -y python3-serial network-manager
 sudo systemctl enable --now NetworkManager
+
+# El medidor puede llegar por un adaptador USB o por los GPIO. Preparar el
+# UART no estorba en el primer caso y es la diferencia entre leer y no leer
+# en el segundo, asi que se hace siempre.
+preparar_uart
 
 if ! ip link show "$ETHERNET_INTERFACE" >/dev/null 2>&1; then
     echo "ERROR: no existe la interfaz $ETHERNET_INTERFACE. Disponibles:"

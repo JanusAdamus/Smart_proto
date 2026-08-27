@@ -69,3 +69,21 @@ def test_stop_cierra_los_puertos():
     assert esperar(lambda: puerto.escrito)
     writer.stop()
     assert esperar(lambda: puerto.closed)
+
+
+def test_se_puede_importar_sin_tkinter(monkeypatch):
+    """La Pi Zero headless no trae python3-tk y ahi no hay ventana que abrir."""
+    import importlib
+    import sys
+
+    for nombre in list(sys.modules):
+        if nombre == "tkinter" or nombre.startswith("tkinter."):
+            monkeypatch.delitem(sys.modules, nombre, raising=False)
+    monkeypatch.setitem(sys.modules, "tkinter", None)
+    modulo = importlib.reload(importlib.import_module("meter_simulator"))
+    try:
+        assert modulo.tk is None
+        assert callable(modulo.run_headless)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(modulo)

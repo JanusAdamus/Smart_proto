@@ -1,13 +1,13 @@
 [Unit]
-Description=Smart meter P1 relay (serie a TCP)
+Description=Smart meter P1 simulator (telegramas DSMR por UART)
 After=network.target
 
 [Service]
 Type=simple
-User=relay
+User=simulator
 WorkingDirectory=/opt/smartmeter
 EnvironmentFile=-/etc/default/smartmeter
-ExecStart=/usr/bin/python3 /opt/smartmeter/relay.py
+ExecStart=/usr/bin/python3 /opt/smartmeter/meter_simulator.py --headless
 Restart=always
 RestartSec=3
 
