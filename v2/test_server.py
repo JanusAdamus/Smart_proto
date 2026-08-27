@@ -1,10 +1,13 @@
+import json
 import socket
+import threading
 import time
+import urllib.request
 
 import pytest
 
 from dsmr import MeterState, generate_telegram
-from server import MeterLink, extract
+from server import MeterLink, extract, make_server
 from store import Store
 
 
@@ -14,6 +17,20 @@ def link(tmp_path):
     yield enlace
     enlace.stop()
     enlace.store.close()
+
+
+@pytest.fixture
+def servidor(link):
+    httpd = make_server(link, port=0)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_port}"
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def pedir(base, ruta):
+    with urllib.request.urlopen(base + ruta, timeout=5) as respuesta:
+        return respuesta.status, respuesta.read()
 
 
 def esperar(condicion, timeout=2.0):
@@ -140,3 +157,70 @@ def test_reconexion_descarta_el_fragmento_de_la_conexion_anterior(link):
             assert estado["rejected"] == 0
         finally:
             segunda.close()
+
+
+def test_latest_devuelve_json_con_el_estado(servidor, link):
+    link.consume(generate_telegram(MeterState()))
+    estado, cuerpo = pedir(servidor, "/api/latest")
+    assert estado == 200
+    datos = json.loads(cuerpo)
+    assert datos["received"] == 1
+    assert datos["values"]["power_in"] is not None
+    assert datos["telegram"].startswith("/")
+
+
+def test_latest_funciona_con_el_enlace_caido(servidor):
+    """El dashboard tiene que poder decir 'sin enlace' en vez de no cargar."""
+    estado, cuerpo = pedir(servidor, "/api/latest")
+    assert estado == 200
+    datos = json.loads(cuerpo)
+    assert datos["connected"] is False
+    assert datos["values"] == {}
+
+
+def test_history_devuelve_las_lecturas_guardadas(servidor, link):
+    link.consume(generate_telegram(MeterState()))
+    estado, cuerpo = pedir(servidor, "/api/history?minutes=60")
+    assert estado == 200
+    filas = json.loads(cuerpo)
+    assert len(filas) == 1
+    assert filas[0]["power_in"] is not None
+
+
+def test_history_acepta_minutes_invalido_sin_reventar(servidor):
+    estado, cuerpo = pedir(servidor, "/api/history?minutes=no-es-un-numero")
+    assert estado == 200
+    assert json.loads(cuerpo) == []
+
+
+def test_history_acota_minutes_entre_un_minuto_y_siete_dias(
+        servidor, link, monkeypatch):
+    consultas = []
+
+    def history(minutes):
+        consultas.append(minutes)
+        return []
+
+    monkeypatch.setattr(link.store, "history", history)
+    pedir(servidor, "/api/history?minutes=0")
+    pedir(servidor, "/api/history?minutes=99999")
+    assert consultas == [1, 60 * 24 * 7]
+
+
+@pytest.mark.parametrize("ruta", ["/api/latest", "/api/history"])
+def test_json_no_se_cachea(servidor, ruta):
+    with urllib.request.urlopen(servidor + ruta, timeout=5) as respuesta:
+        assert respuesta.headers["Cache-Control"] == "no-store"
+
+
+def test_raiz_sirve_el_dashboard(servidor):
+    estado, cuerpo = pedir(servidor, "/")
+    assert estado == 200
+    assert b"<html" in cuerpo.lower()
+
+
+def test_ruta_desconocida_da_404(servidor):
+    import urllib.error
+    with pytest.raises(urllib.error.HTTPError) as error:
+        pedir(servidor, "/no-existe")
+    assert error.value.code == 404

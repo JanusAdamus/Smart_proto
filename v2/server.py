@@ -1,8 +1,11 @@
 """Pi con pantalla: consume el flujo de la lectora y sirve el dashboard."""
 
+import json
 import os
 import socket
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from dsmr import InvalidTelegram, TelegramReader, number, parse_telegram, parse_timestamp
 from store import Store
@@ -10,6 +13,8 @@ from store import Store
 READER_HOST = os.environ.get("SMARTMETER_READER_HOST", "192.168.7.1")
 READER_PORT = int(os.environ.get("SMARTMETER_READER_PORT", "4000"))
 DB_PATH = os.environ.get("SMARTMETER_DB", "/var/lib/smartmeter/readings.db")
+HTTP_PORT = int(os.environ.get("SMARTMETER_HTTP_PORT", "8080"))
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 TIMESTAMP_CODE = "0-0:1.0.0"
 
 # Que codigo OBIS alimenta cada columna. Este mapa es la unica parte del
@@ -166,3 +171,74 @@ class MeterLink:
                 self.store.prune(days=7)
             except Exception as error:
                 print(f"no se pudo limpiar la base: {error}", flush=True)
+
+
+class DashboardHandler(BaseHTTPRequestHandler):
+    link = None  # lo inyecta make_server
+
+    def do_GET(self):
+        route = urlparse(self.path)
+        if route.path == "/":
+            return self._send_file("index.html", "text/html; charset=utf-8")
+        if route.path == "/api/latest":
+            return self._send_json(self.link.snapshot())
+        if route.path == "/api/history":
+            return self._send_json(self._history(route.query))
+        self.send_error(404)
+
+    def _history(self, query):
+        raw = parse_qs(query).get("minutes", ["60"])[0]
+        try:
+            minutes = int(raw)
+        except ValueError:
+            # Un parametro roto no debe tumbar el dashboard entero.
+            return []
+        return self.link.store.history(minutes=max(1, min(minutes, 60 * 24 * 7)))
+
+    def _send_json(self, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        # El dashboard consulta cada segundo; una respuesta cacheada seria
+        # un dashboard congelado.
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_file(self, name, content_type):
+        try:
+            with open(os.path.join(STATIC_DIR, name), "rb") as handle:
+                body = handle.read()
+        except OSError:
+            return self.send_error(404)
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        """Silencio: una linea por peticion son 86.400 lineas de journal por
+        dia por espectador, y ninguna dice nada."""
+
+
+def make_server(link, port=HTTP_PORT):
+    handler = type("BoundHandler", (DashboardHandler,), {"link": link})
+    httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
+    httpd.daemon_threads = True
+    return httpd
+
+
+def main():
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+    link = MeterLink(Store(DB_PATH))
+    link.start()
+    print(f"dashboard en http://0.0.0.0:{HTTP_PORT}", flush=True)
+    make_server(link).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
