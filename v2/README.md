@@ -133,10 +133,23 @@ lectora sí sondea: prueba todos los puertos y se queda con el que manda un `/`.
 
 ## Conexión
 
-Cable Ethernet entre las dos Pis. En la lectora, el cable P1 (Plan A) o el
-USB-serie (Plan B). El dashboard aparece solo en la pantalla al arrancar; los
-teléfonos se conectan a la red WiFi `smartmeter` y abren
-`http://192.168.7.2:8080`.
+Cable Ethernet entre las dos Pis. En la lectora, el cable P1 (Plan A), el
+USB-serie (Plan B) o el UART de la Zero (Plan B-UART). El dashboard aparece
+solo en la pantalla al arrancar.
+
+**La dirección depende de por dónde llegues.** La Pi de pantalla tiene dos
+redes y una IP en cada una:
+
+| Desde dónde | URL |
+|---|---|
+| Su propia pantalla (kiosco) | `http://localhost:8080` |
+| Un teléfono en la red WiFi `smartmeter` | `http://10.42.0.1:8080` |
+| La Pi lectora, por el cable Ethernet | `http://192.168.7.2:8080` |
+
+`10.42.0.1` es la dirección que NetworkManager le da al hotspot en modo
+compartido; `192.168.7.2` vive solo en el cable entre las dos Pis y desde el
+WiFi no se llega. Si no estás seguro, `ip -brief addr` en la Pi de pantalla las
+lista todas.
 
 ## Sin medidor real: p1meter.dev
 
