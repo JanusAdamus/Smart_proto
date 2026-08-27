@@ -2025,7 +2025,7 @@ Se hereda de `v1/meter_simulator.py` la interfaz gráfica, la selección de puer
 - Consume: `MeterState`, `generate_telegram` de `dsmr`; `open_all_ports`, `port_still_present`, `BAUDRATE` de `serial_link`.
 - Produce: `MeterSerialWriter(serial_factory=None, baudrate=BAUDRATE)` con `start()`, `stop()`, `status() -> tuple[list[str], int, list[str]]`, `reading_snapshot() -> dict`, `latest_telegram_snapshot() -> str`; `SmartMeterGeneratorUI(root, writer)`; `main()`.
 
-- [ ] **Paso 1: Escribir los tests que fallan**
+- [x] **Paso 1: Escribir los tests que fallan**
 
 Crear `v2/test_meter_simulator.py`:
 
@@ -2103,7 +2103,7 @@ def test_stop_cierra_los_puertos():
     assert esperar(lambda: puerto.closed)
 ```
 
-- [ ] **Paso 2: Ejecutar los tests para verificar que fallan**
+- [x] **Paso 2: Ejecutar los tests para verificar que fallan**
 
 ```bash
 cd v2 && python -m pytest test_meter_simulator.py -q
@@ -2111,7 +2111,7 @@ cd v2 && python -m pytest test_meter_simulator.py -q
 
 Esperado: FAIL con `ModuleNotFoundError: No module named 'meter_simulator'`.
 
-- [ ] **Paso 3: Escribir la implementación mínima**
+- [x] **Paso 3: Escribir la implementación mínima**
 
 Crear `v2/meter_simulator.py`. Partir de `v1/meter_simulator.py` y aplicar exactamente estos cambios; el resto (la clase `SmartMeterGeneratorUI`, `_port_alive`, `_drop`, `_note` y `main`) se copia sin tocar, porque documenta comportamiento aprendido con hardware real:
 
@@ -2150,7 +2150,7 @@ Crear `v2/meter_simulator.py`. Partir de `v1/meter_simulator.py` y aplicar exact
 
 5. Cambiar el pie de la ventana a `"DSMR 5.0.2  |  Serial output  |  1 telegram per second"` y agrandar el `Text` del telegrama a `height=14`, porque ahora son 37 líneas en vez de 5.
 
-- [ ] **Paso 4: Ejecutar los tests para verificar que pasan**
+- [x] **Paso 4: Ejecutar los tests para verificar que pasan**
 
 ```bash
 cd v2 && python -m pytest -q
@@ -2158,7 +2158,7 @@ cd v2 && python -m pytest -q
 
 Esperado: 60 passed.
 
-- [ ] **Paso 5: Commit**
+- [x] **Paso 5: Commit**
 
 ```bash
 git add v2/meter_simulator.py v2/test_meter_simulator.py
@@ -2178,7 +2178,7 @@ La cadena entera —simulador, puerto serie, relay, TCP, parser, SQLite, HTTP—
 - Consume: todo lo anterior.
 - Produce: nada.
 
-- [ ] **Paso 1: Escribir el test que falla**
+- [x] **Paso 1: Escribir el test que falla**
 
 Crear `v2/test_integration_e2e.py`:
 
@@ -2283,7 +2283,7 @@ def test_del_simulador_al_dashboard_sin_hardware(tmp_path):
         os.close(esclavo)
 ```
 
-- [ ] **Paso 2: Ejecutar el test para verificar que falla o se salta**
+- [x] **Paso 2: Ejecutar el test para verificar que falla o se salta**
 
 ```bash
 cd v2 && python -m pytest test_integration_e2e.py -q
@@ -2291,11 +2291,11 @@ cd v2 && python -m pytest test_integration_e2e.py -q
 
 Esperado en Linux o macOS: FAIL hasta que todo encaje. Esperado en Windows: `1 skipped` (no hay `os.openpty`). En ese caso, ejecutarlo en la Raspberry Pi antes de dar la tarea por terminada; una prueba de integración que solo se salta no prueba nada.
 
-- [ ] **Paso 3: Corregir lo que la prueba destape**
+- [x] **Paso 3: Corregir lo que la prueba destape**
 
 No se anticipa código nuevo: si esta prueba falla, es porque una interfaz entre módulos no coincide con lo que declara su tarea. Arreglar el módulo, no la prueba.
 
-- [ ] **Paso 4: Ejecutar la suite completa**
+- [x] **Paso 4: Ejecutar la suite completa**
 
 ```bash
 cd v2 && python -m pytest -q
@@ -2303,7 +2303,7 @@ cd v2 && python -m pytest -q
 
 Esperado en la Pi: 61 passed.
 
-- [ ] **Paso 5: Commit**
+- [x] **Paso 5: Commit**
 
 ```bash
 git add v2/test_integration_e2e.py
@@ -2327,7 +2327,7 @@ Sin esto no hay prototipo: hay scripts que alguien tiene que arrancar a mano cad
 - Consume: `relay.py` y `serial_link.py` (Tarea 5); `server.py`, `store.py`, `dsmr.py`, `static/` (Tareas 6-9).
 - Produce: nada que consuma otra tarea.
 
-- [ ] **Paso 1: Escribir las unidades de systemd**
+- [x] **Paso 1: Escribir las unidades de systemd**
 
 Crear `v2/systemd/relay.service`:
 
@@ -2377,7 +2377,7 @@ Exec=/opt/smartmeter/kiosk.sh
 X-GNOME-Autostart-enabled=true
 ```
 
-- [ ] **Paso 2: Escribir `install_reader.sh`**
+- [x] **Paso 2: Escribir `install_reader.sh`**
 
 Crear `v2/install_reader.sh`:
 
@@ -2442,7 +2442,7 @@ echo "Estado: systemctl status relay"
 echo "Datos:  journalctl -u relay -f"
 ```
 
-- [ ] **Paso 3: Escribir `install_display.sh`**
+- [x] **Paso 3: Escribir `install_display.sh`**
 
 Crear `v2/install_display.sh`:
 
@@ -2541,7 +2541,7 @@ echo "Estado: systemctl status display"
 echo "Datos:  journalctl -u display -f"
 ```
 
-- [ ] **Paso 4: Verificar la sintaxis de los scripts**
+- [x] **Paso 4: Verificar la sintaxis de los scripts**
 
 ```bash
 bash -n v2/install_reader.sh && bash -n v2/install_display.sh && echo "sintaxis correcta"
@@ -2549,7 +2549,7 @@ bash -n v2/install_reader.sh && bash -n v2/install_display.sh && echo "sintaxis 
 
 Esperado: `sintaxis correcta`.
 
-- [ ] **Paso 5: Commit**
+- [x] **Paso 5: Commit**
 
 ```bash
 chmod +x v2/install_reader.sh v2/install_display.sh
@@ -2568,7 +2568,7 @@ git commit -m "build(v2): instaladores, servicios systemd y kiosco"
 - Consume: todo lo anterior.
 - Produce: nada.
 
-- [ ] **Paso 1: Escribir el README**
+- [x] **Paso 1: Escribir el README**
 
 Crear `v2/README.md` con estas secciones, escritas a partir de lo que quedó implementado (no copiar la spec: el README dice cómo usarlo, la spec dice por qué es así):
 
@@ -2583,7 +2583,7 @@ Crear `v2/README.md` con estas secciones, escritas a partir de lo que quedó imp
 9. **Diagnóstico.** Tabla de síntoma y causa: el dashboard dice "No link to the reader Pi" (revisar cable y `systemctl status relay`); el contador de rechazados sube (cable con ruido o demasiado largo); el relay no encuentra puerto (`journalctl -u relay -f` lista los puertos probados); la pantalla muestra error en vez del dashboard (`systemctl status display`).
 10. **Alcance y limitaciones**, resumido de la spec: no es un producto certificado, el dashboard no tiene autenticación, el TCP entre las Pis va en texto plano, Plan A no está verificado con hardware real, y DSMR anterior a la versión 4 (9600 baudios, 7E1) queda fuera de alcance.
 
-- [ ] **Paso 2: Verificar que la suite completa pasa**
+- [x] **Paso 2: Verificar que la suite completa pasa**
 
 ```bash
 cd v2 && python -m pytest -q
@@ -2591,7 +2591,7 @@ cd v2 && python -m pytest -q
 
 Esperado en la Pi: 61 passed. En Windows: 60 passed, 1 skipped.
 
-- [ ] **Paso 3: Verificar que no quedó ninguna dependencia de v1**
+- [x] **Paso 3: Verificar que no quedó ninguna dependencia de v1**
 
 ```bash
 cd v2 && grep -rn "from v1\|import v1\|\.\./v1" --include="*.py" --include="*.sh" . ; echo "salida vacia = correcto"
@@ -2599,7 +2599,7 @@ cd v2 && grep -rn "from v1\|import v1\|\.\./v1" --include="*.py" --include="*.sh
 
 Esperado: sin coincidencias.
 
-- [ ] **Paso 4: Verificar que no se coló ninguna dependencia externa nueva**
+- [x] **Paso 4: Verificar que no se coló ninguna dependencia externa nueva**
 
 ```bash
 cd v2 && grep -rhn "^import \|^from " --include="*.py" . | grep -v "^.*:from dsmr\|from store\|from server\|from relay\|from serial_link" | sort -u
@@ -2607,7 +2607,7 @@ cd v2 && grep -rhn "^import \|^from " --include="*.py" . | grep -v "^.*:from dsm
 
 Revisar a ojo: solo debe haber módulos de la biblioteca estándar y `serial`. Cualquier otra cosa es una dependencia que se coló y hay que quitarla.
 
-- [ ] **Paso 5: Commit**
+- [x] **Paso 5: Commit**
 
 ```bash
 git add v2/README.md
