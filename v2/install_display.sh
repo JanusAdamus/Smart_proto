@@ -20,8 +20,17 @@ if [ -z "$AP_PASSWORD" ]; then
 fi
 
 sudo apt-get update
-sudo apt-get install -y python3 network-manager chromium-browser
+sudo apt-get install -y python3 network-manager
 sudo systemctl enable --now NetworkManager
+
+# El kiosco es opcional: la pagina se sirve igual sin pantalla. En una imagen
+# Lite no hay sesion grafica, y ahi Chromium serian centenares de MB que nunca
+# van a dibujar nada. /etc/xdg/autostart solo existe con escritorio instalado.
+CON_PANTALLA=""
+if [ -d /etc/xdg/autostart ]; then
+    CON_PANTALLA=1
+    sudo apt-get install -y chromium-browser
+fi
 
 if ! ip link show "$ETHERNET_INTERFACE" >/dev/null 2>&1; then
     echo "ERROR: no existe la interfaz $ETHERNET_INTERFACE. Disponibles:"
@@ -67,10 +76,11 @@ SMARTMETER_READER_HOST=$READER_HOST
 SMARTMETER_READER_PORT=${SMARTMETER_READER_PORT:-4000}
 ENTORNO
 
-# Chromium falla si el servidor todavia no responde, y la pantalla se queda en
-# una pagina de error hasta que alguien la refresque a mano. Esperar el puerto
-# es la diferencia entre encender la Pi y ver el dashboard, o no verlo.
-sudo tee /opt/smartmeter/kiosk.sh >/dev/null <<'KIOSK'
+if [ -n "$CON_PANTALLA" ]; then
+    # Chromium falla si el servidor todavia no responde, y la pantalla se queda
+    # en una pagina de error hasta que alguien la refresque a mano. Esperar el
+    # puerto es la diferencia entre encender la Pi y ver el dashboard, o no.
+    sudo tee /opt/smartmeter/kiosk.sh >/dev/null <<'KIOSK'
 #!/bin/bash
 for _ in $(seq 1 60); do
     if (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null; then break; fi
@@ -79,9 +89,10 @@ done
 exec chromium-browser --kiosk --noerrdialogs --disable-infobars \
     --check-for-update-interval=31536000 http://localhost:8080
 KIOSK
-sudo chmod +x /opt/smartmeter/kiosk.sh
-sudo cp "$SCRIPT_DIR/systemd/smartmeter-kiosk.desktop" \
-    /etc/xdg/autostart/smartmeter-kiosk.desktop
+    sudo chmod +x /opt/smartmeter/kiosk.sh
+    sudo cp "$SCRIPT_DIR/systemd/smartmeter-kiosk.desktop" \
+        /etc/xdg/autostart/smartmeter-kiosk.desktop
+fi
 
 sudo cp "$SCRIPT_DIR/systemd/display.service" /etc/systemd/system/display.service
 sudo systemctl daemon-reload
@@ -94,6 +105,11 @@ fi
 sudo systemctl restart display
 echo "Pi de pantalla instalada en $ETHERNET_ADDRESS, leyendo de $READER_HOST."
 echo "Dashboard: http://localhost:8080 (local) y por la red $AP_SSID."
+if [ -n "$CON_PANTALLA" ]; then
+    echo "Kiosco instalado: arranca solo con la sesion grafica (reinicia para verlo)."
+else
+    echo "Sin escritorio: no se instalo el kiosco. La pagina se sirve igual."
+fi
 if [ -n "$GENERADA" ]; then
     echo "Clave del AP generada: $AP_PASSWORD"
     echo "Guardala: no se vuelve a mostrar. Para fijar otra, reejecuta con"
