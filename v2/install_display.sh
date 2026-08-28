@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ETHERNET_INTERFACE="${SMARTMETER_ETHERNET_INTERFACE:-eth0}"
 ETHERNET_ADDRESS="${SMARTMETER_ETHERNET_ADDRESS:-192.168.7.2/24}"
 WIFI_INTERFACE="${SMARTMETER_WIFI_INTERFACE:-wlan0}"
-AP_SSID="${SMARTMETER_AP_SSID:-smartmeter}"
+AP_SSID="${SMARTMETER_AP_SSID:-dashboard}"
 CONNECTION_NAME="smartmeter-direct"
 # A quien se conecta el enlace TCP. Por omision la Pi lectora; apuntandolo a
 # otra maquina se consume el simulador de P1 (ver README, "Sin medidor real").

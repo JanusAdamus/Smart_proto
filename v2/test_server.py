@@ -289,3 +289,16 @@ def test_main_cierra_todos_los_recursos(monkeypatch, tmp_path, error):
             server.main()
 
     assert eventos[-3:] == ["server_close", "link.stop", "store.close"]
+
+
+def test_el_primer_rechazo_deja_el_motivo_en_el_log(link, capsys):
+    """El dia que llegue el medidor real, "rejected sube" sin nada mas no dice
+    si es el CRC, el encuadre o que no es DSMR. Solo el primero: uno por
+    segundo llenaria el journal."""
+    telegrama = generate_telegram(MeterState())
+    roto = telegrama[:-6] + b"0000\r\n"
+    link.consume(roto)
+    link.consume(roto)
+    salida = capsys.readouterr().out
+    assert salida.count("telegrama rechazado") == 1
+    assert "checksum no coincide" in salida

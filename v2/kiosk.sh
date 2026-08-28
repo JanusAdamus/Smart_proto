@@ -30,7 +30,11 @@ pantallas() {
     # normalmente fb1 y con el nombre del driver (fb_ili9486 y parecidos).
     for fb in /sys/class/graphics/fb[0-9]*; do
         [ -r "$fb/name" ] || continue
+        # Con el tamaño: si el escritorio se dibuja mas grande que el panel,
+        # el panel enseña una esquina y la pagina se ve cortada. Ese numero
+        # es la unica forma de distinguirlo de un problema de la pagina.
         encontradas="$encontradas $(basename "$fb"):$(cat "$fb/name" 2>/dev/null)"
+        encontradas="$encontradas@$(tr ',' 'x' <"$fb/virtual_size" 2>/dev/null)"
     done
     echo "${encontradas# }"
 }
@@ -61,7 +65,27 @@ done
 # entero, y en una tactil no hace falta para nada.
 command -v unclutter >/dev/null 2>&1 && unclutter -idle 0 &
 
-anotar "abriendo $URL con $NAVEGADOR"
-exec "$NAVEGADOR" --kiosk --noerrdialogs --disable-infobars \
+# Chromium no hace ventanas de navegador mas angostas que unos 400 px, ni en
+# modo kiosco. En la TFT de 320 eso dibuja mas ancho que la pantalla y se
+# pierde un quinto por la derecha. Una ventana de aplicacion (--app) si acepta
+# el tamaño que se le pide. El tamaño sale del framebuffer en vez de estar
+# fijo aqui, para que en un monitor HDMI grande la ventana lo siga ocupando
+# entero: virtual_size ya viene como "ancho,alto", que es el formato exacto
+# que espera --window-size.
+FB_SIZE="${SMARTMETER_FB_SIZE_FILE:-/sys/class/graphics/fb0/virtual_size}"
+TAMANO=$(cat "$FB_SIZE" 2>/dev/null)
+case "$TAMANO" in
+    [0-9]*,[0-9]*) VENTANA="--app=$URL --window-size=$TAMANO --window-position=0,0" ;;
+    *) anotar "sin tamaño en $FB_SIZE; abro en modo kiosco"
+       VENTANA="--kiosk $URL" ;;
+esac
+
+anotar "abriendo $URL con $NAVEGADOR ventana=${TAMANO:-kiosk}"
+# --password-store=basic: sin el, Chromium pide abrir el llavero en cada
+# arranque. Con autologin nadie escribe una contraseña, PAM no desbloquea el
+# llavero de login y gnome-keyring saca su dialogo encima del kiosco. No
+# guardamos ninguna credencial: el llavero sobra.
+exec "$NAVEGADOR" $VENTANA --noerrdialogs --disable-infobars \
     --disable-session-crashed-bubble --disable-features=Translate \
-    --check-for-update-interval=31536000 "$URL"
+    --password-store=basic \
+    --check-for-update-interval=31536000

@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smart Meter P1</title>
 <style>
+  /* Margen de seguridad del panel. El marco y el protector de la TFT tapan
+     unos pixeles del borde, y cuantos depende del ejemplar: es una medida
+     fisica, no un valor de diseno. Subir si sigue cortado, bajar si sobra
+     hueco. Solo lo usa el modo compacto. */
+  :root { --inset: 12px; }
+
   :root { color-scheme: dark;
           --bg:#12151a; --panel:#1b1f27; --ink:#e6e9ef; --dim:#8b95a5;
           --ok:#4ade80; --bad:#f87171; --line:#2a3040; }
@@ -39,8 +45,8 @@
   @media (max-width: 560px), (max-height: 430px) {
     /* Altura fija y un solo panel con scroll. Sin esto la pagina crece hacia
        abajo y en una pantalla de 320 px de alto no se ve ni la mitad. */
-    body { height: 100vh; padding: 8px; display: flex; flex-direction: column;
-           overflow: hidden; }
+    body { height: 100vh; padding: var(--inset); display: flex;
+           flex-direction: column; overflow: hidden; }
     h1 { display: none; }
 
     #hero { display: flex; align-items: baseline; gap: 6px; flex: none;
@@ -57,6 +63,7 @@
     #tabs button { flex: 1; min-height: 44px; border: 0; border-radius: 8px;
                    background: var(--panel); color: var(--dim);
                    font: 600 12px/1 system-ui, sans-serif; letter-spacing: .04em;
+                   padding: 0; font-size: clamp(10px, 3.1vw, 12px);
                    text-transform: uppercase; -webkit-tap-highlight-color: transparent; }
     #tabs button[aria-selected="true"] { background: #26303f; color: var(--ink); }
 

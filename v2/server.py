@@ -94,9 +94,16 @@ class MeterLink:
         for raw in self._reader.feed(chunk):
             try:
                 parsed = parse_telegram(raw)
-            except InvalidTelegram:
+            except InvalidTelegram as error:
                 with self._lock:
                     self.rejected += 1
+                    primero = self.rejected == 1
+                # Solo el primero. Un medidor que no encaja lo dice ya en su
+                # primer telegrama, y uno por segundo llenaria el journal. Sin
+                # esta linea el contador sube y no queda nada que mirar: es la
+                # diferencia entre "no funciona" y saber por que.
+                if primero:
+                    print(f"telegrama rechazado ({error}): {raw[:200]!r}", flush=True)
                 continue
             objects = parsed["objects"]
             values = extract(objects)

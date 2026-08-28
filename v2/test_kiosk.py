@@ -22,8 +22,12 @@ def correr(path_falso, extra_env=None):
     # binarios de un bash para Windows arrastran DLLs de su propia carpeta y
     # copiarlos sueltos no funciona.
     ruta = str(path_falso) + os.pathsep + os.environ.get("PATH", "")
+    # El tamaño de la ventana sale de un archivo que en la Pi si existe: se
+    # apunta a uno inexistente para que los tests den igual aqui que alli, y
+    # el que lo prueba de verdad lo sobreescribe.
     entorno = dict(os.environ, PATH=ruta, SMARTMETER_HTTP_PORT="1",
-                   SMARTMETER_KIOSK_WAIT="1")
+                   SMARTMETER_KIOSK_WAIT="1",
+                   SMARTMETER_FB_SIZE_FILE=str(path_falso / "sin-fb"))
     entorno.pop("DISPLAY", None)
     entorno.pop("WAYLAND_DISPLAY", None)
     entorno.update(extra_env or {})
@@ -94,3 +98,38 @@ def test_anota_la_sesion_y_las_pantallas_encontradas(bin_falso, tmp_path):
     resultado = correr(bin_falso, {"DISPLAY": ":0"})
     assert "sesion=:0" in resultado.stdout
     assert "pantallas=" in resultado.stdout
+
+
+def test_no_toca_el_llavero(bin_falso, tmp_path):
+    """Con autologin nadie escribe una contrasena y el llavero de login queda
+    cerrado: sin este flag gnome-keyring pide abrirlo tapando el dashboard en
+    cada arranque."""
+    marca = tmp_path / "abierto.txt"
+    falso(bin_falso, "chromium", f'echo "$@" > "{marca}"')
+    assert correr(bin_falso).returncode == 0
+    assert "--password-store=basic" in marca.read_text()
+
+
+def test_ventana_del_tamano_de_la_pantalla(bin_falso, tmp_path):
+    """Chromium no hace ventanas de navegador de menos de ~400 px ni en modo
+    kiosco: en la TFT de 320 dibujaba mas ancho que la pantalla y se perdia un
+    quinto por la derecha. Una ventana --app si acepta el tamaño pedido."""
+    marca = tmp_path / "abierto.txt"
+    falso(bin_falso, "chromium", f'echo "$@" > "{marca}"')
+    fb = tmp_path / "virtual_size"
+    fb.write_text("320,480", newline="\n")
+    assert correr(bin_falso, {"SMARTMETER_FB_SIZE_FILE": str(fb)}).returncode == 0
+    args = marca.read_text()
+    assert "--window-size=320,480" in args
+    assert "--app=http://localhost:1" in args
+    assert "--kiosk" not in args
+
+
+def test_vuelve_al_kiosco_si_no_hay_tamano(bin_falso, tmp_path):
+    """En un HDMI normal o si el framebuffer no dice su tamaño, el modo kiosco
+    de siempre: ahi el minimo de Chromium no estorba."""
+    marca = tmp_path / "abierto.txt"
+    falso(bin_falso, "chromium", f'echo "$@" > "{marca}"')
+    resultado = correr(bin_falso, {"SMARTMETER_FB_SIZE_FILE": str(tmp_path / "no-existe")})
+    assert resultado.returncode == 0
+    assert "--kiosk" in marca.read_text()

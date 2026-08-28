@@ -143,7 +143,7 @@ redes y una IP en cada una:
 | Desde dónde | URL |
 |---|---|
 | Su propia pantalla (kiosco) | `http://localhost:8080` |
-| Un teléfono en la red WiFi `smartmeter` | `http://10.42.0.1:8080` |
+| Un teléfono en la red WiFi `dashboard` | `http://10.42.0.1:8080` |
 | La Pi lectora, por el cable Ethernet | `http://192.168.7.2:8080` |
 
 `10.42.0.1` es la dirección que NetworkManager le da al hotspot en modo
@@ -196,6 +196,54 @@ nativos: para usarla apaisada hay que rotarla (el driver del fabricante trae el
 parámetro; si no, `display_rotate` en `config.txt`). Y la resistiva necesita
 calibración una vez.
 
+### Si la imagen se ve cortada
+
+Tres causas, en orden de probabilidad. Las tres se ven igual desde fuera, y el
+tamaño que anota el kiosco al arrancar las separa:
+
+```bash
+journalctl -t smartmeter-kiosk -n 20 --no-pager -o cat
+```
+
+**1. La ventana es más ancha que la pantalla.** Chromium no hace ventanas de
+navegador de menos de unos 400 px, ni en modo kiosco: en un panel de 320 px se
+pierde justo un quinto por la derecha. Por eso `kiosk.sh` abre una ventana de
+aplicación (`--app`) del tamaño exacto del framebuffer en vez de un kiosco, y
+solo cae al kiosco de siempre si no consigue leer ese tamaño. Si la línea del
+log dice `ventana=kiosk` en una pantalla pequeña, ese es el problema y falta
+`/sys/class/graphics/fb0/virtual_size`.
+
+**2. El marco del panel tapa el borde.** Milímetros, no un quinto de pantalla.
+La perilla es `--inset` al principio de `static/index.html`: 12 px por
+omisión, subir si sigue comiéndose el borde, bajar si sobra hueco. Es una
+medida física del ejemplar que tengas, no un valor de diseño.
+
+**3. El escritorio se dibuja más grande que el panel.** Pasa con los montajes
+que copian fb0 a fb1 con `fbcp`. La línea del log lo canta:
+`pantallas= fb0:BCM2708 FB@1920x1080 fb1:fb_ili9486@480x320`. Si los dos
+tamaños coinciden, no es esto. Se arregla fijando la resolución del escritorio
+al tamaño del panel, con KMS al final de la línea única de
+`/boot/firmware/cmdline.txt`:
+
+```
+video=HDMI-A-1:480x320@60D
+```
+
+o, si el vendedor del panel dejó el KMS comentado en `config.txt`, con la
+versión antigua del mismo ajuste:
+
+```
+hdmi_force_hotplug=1
+hdmi_group=2
+hdmi_mode=87
+hdmi_cvt=480 320 60 1 0 0 0
+```
+
+Aparte de las tres: si el panel sale de pie —320 de ancho por 480 de alto— y
+lo quieres apaisado, lo que falta es rotarlo, `rotate=90` en el `dtoverlay` del
+driver o `display_rotate=1` en `config.txt`. Al revés también vale: el modo
+compacto funciona igual en vertical, que es como viene de fábrica.
+
 El resto del sistema no se entera: la pantalla es un asunto de la Pi de
 pantalla y del navegador, no del servidor.
 
@@ -243,7 +291,7 @@ implementación que no es nuestra.
 | `SMARTMETER_ETHERNET_INTERFACE` | instaladores | `eth0` | Interfaz del cable entre Pis |
 | `SMARTMETER_ETHERNET_ADDRESS` | instaladores | `192.168.7.1/24` (lectora), `.2/24` (pantalla) | IP fija de ese cable |
 | `SMARTMETER_WIFI_INTERFACE` | `install_display.sh` | `wlan0` | Interfaz del AP |
-| `SMARTMETER_AP_SSID` | `install_display.sh` | `smartmeter` | Nombre de la red WiFi |
+| `SMARTMETER_AP_SSID` | `install_display.sh` | `dashboard` | Nombre de la red WiFi |
 | `SMARTMETER_AP_PASSWORD` | `install_display.sh` | se genera una | Clave del AP |
 | `SMARTMETER_READER_HOST` | Pi de pantalla | `192.168.7.1` | A quién se conecta el enlace TCP |
 | `SMARTMETER_READER_PORT` | Pi de pantalla | `4000` | Puerto de ese enlace |
@@ -272,8 +320,10 @@ cadena con un puerto serie de mentira y corre en cualquier plataforma.
 | El contador de rechazados sube | Ruido en el cable serie, o un cable demasiado largo |
 | El relay no encuentra puerto | `journalctl -u relay -f` lista los puertos que probó |
 | Por UART no llega nada | ¿Reiniciaste las dos Pis? ¿TX contra RX (cruzado) y las masas unidas? `journalctl -u simulator -f` en la Zero |
-| Por UART llegan bytes rotos a ratos | El mini UART deriva: comprobá que `dtoverlay=disable-bt` quedó en `config.txt` y reiniciá |
+| Por UART llegan bytes rotos a ratos | El mini UART deriva: comprueba que `dtoverlay=disable-bt` quedó en `config.txt` y reinicia |
 | La pantalla muestra un error en vez del dashboard | `systemctl status display` |
+| La imagen se ve cortada en el panel | `journalctl -t smartmeter-kiosk`: la línea `ventana=`; ver "Si la imagen se ve cortada" |
+| Al arrancar pide la contraseña del llavero | Ya no debería: `kiosk.sh` pasa `--password-store=basic`. Si insiste, `rm ~/.local/share/keyrings/login.keyring` y reiniciar |
 | Llegan telegramas pero el gráfico está vacío | El medidor no informa ese campo; mirar el telegrama crudo al pie del dashboard |
 
 ## Alcance y limitaciones
