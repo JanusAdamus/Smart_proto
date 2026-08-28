@@ -167,6 +167,29 @@ ancho (o 430 px de alto) pasa al modo compacto, pensado para la TFT SPI de
   refresco va a unos pocos fps, y repintar la página entera cada segundo se ve
   como un parpadeo continuo.
 
+### El kiosco arranca solo
+
+`install_display.sh` deja el arranque configurado al escritorio con autologin
+(`raspi-config nonint do_boot_behaviour B4`) e instala `kiosk.sh` en
+`/etc/xdg/autostart`. Al abrir la sesión gráfica el script espera a que el
+dashboard responda y abre Chromium a pantalla completa, en la pantalla que
+haya: no hay que decirle si es el HDMI o la TFT, porque para el navegador son
+la misma pantalla y la página cambia de diseño sola según el tamaño.
+
+Es un script de sesión y no un servicio del sistema a propósito: dentro de la
+sesión ya vienen resueltos `DISPLAY` o `WAYLAND_DISPLAY` y `XDG_RUNTIME_DIR`.
+Un servicio tendría que reconstruir ese entorno a mano y adivinar cuál de los
+dos servidores gráficos está corriendo.
+
+Si la pantalla queda negra, el motivo está en el journal:
+
+```bash
+journalctl -t smartmeter-kiosk -n 20
+```
+
+Anota la sesión que encontró y las salidas de vídeo conectadas, que es
+justamente lo que no se puede deducir mirando una pantalla apagada.
+
 Con el driver GPIO puesto **el HDMI deja de dar señal**, así que conviene
 instalarlo cuando ya no haga falta el monitor grande. La pantalla es de 320×480
 nativos: para usarla apaisada hay que rotarla (el driver del fabricante trae el

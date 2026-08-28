@@ -79,29 +79,20 @@ SMARTMETER_READER_PORT=${SMARTMETER_READER_PORT:-4000}
 ENTORNO
 
 if [ -n "$CON_PANTALLA" ]; then
-    # Chromium falla si el servidor todavia no responde, y la pantalla se queda
-    # en una pagina de error hasta que alguien la refresque a mano. Esperar el
-    # puerto es la diferencia entre encender la Pi y ver el dashboard, o no.
-    sudo tee /opt/smartmeter/kiosk.sh >/dev/null <<'KIOSK'
-#!/bin/bash
-# El binario se llama chromium-browser o chromium segun la version del
-# sistema. Se resuelve al arrancar y no al instalar, porque una actualizacion
-# puede cambiarlo por debajo y el kiosco quedaria mudo sin decir por que.
-NAVEGADOR=$(command -v chromium-browser || command -v chromium)
-if [ -z "$NAVEGADOR" ]; then
-    echo "kiosk: no hay chromium instalado" >&2
-    exit 1
-fi
-for _ in $(seq 1 60); do
-    if (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null; then break; fi
-    sleep 1
-done
-exec "$NAVEGADOR" --kiosk --noerrdialogs --disable-infobars \
-    --check-for-update-interval=31536000 http://localhost:8080
-KIOSK
+    sudo cp "$SCRIPT_DIR/kiosk.sh" /opt/smartmeter/kiosk.sh
     sudo chmod +x /opt/smartmeter/kiosk.sh
     sudo cp "$SCRIPT_DIR/systemd/smartmeter-kiosk.desktop" \
         /etc/xdg/autostart/smartmeter-kiosk.desktop
+    # Oculta el puntero, que quieto sobre una pantalla de 3,5" tapa un digito.
+    sudo apt-get install -y unclutter || true
+
+    # Sin esto no hay nada automatico: el kiosco vive dentro de la sesion
+    # grafica, y si la Pi arranca a consola y espera un login esa sesion no
+    # existe. B4 es "Desktop Autologin" en raspi-config.
+    if command -v raspi-config >/dev/null 2>&1; then
+        sudo raspi-config nonint do_boot_behaviour B4 || \
+            echo "No se pudo fijar el arranque al escritorio; hazlo con raspi-config."
+    fi
 fi
 
 sudo cp "$SCRIPT_DIR/systemd/display.service" /etc/systemd/system/display.service
