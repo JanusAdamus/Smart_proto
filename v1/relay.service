@@ -1,0 +1,17 @@
+[Unit]
+Description=Smart Meter Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -u /opt/smartmeter/relay.py
+WorkingDirectory=/opt/smartmeter
+Restart=always
+RestartSec=3
+User=relay
+# El relay sondea todos los puertos y se queda con el que emite telegramas.
+# Descomentar solo para saltear esa deteccion y forzar uno a mano:
+#Environment=SMARTMETER_PORT=/dev/ttyUSB0
+
+[Install]
+WantedBy=multi-user.target

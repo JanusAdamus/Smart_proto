@@ -1,7 +1,10 @@
-.superpowers/
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
-build/
-dist/
-*.spec
+*.db
+*.db-shm
+*.db-wal
+.test-tmp-*/
+
+# Clon de referencia de p1meter.dev: repositorio ajeno, con su propio git.
+external/
