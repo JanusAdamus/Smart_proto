@@ -30,7 +30,8 @@ Plan C:  [PC con p1_source.py] --------------------------> TCP 4000, bytes crudo
                                                    (pantalla local)    (teléfonos, laptops)
 ```
 
-- **Plan A** — medidor real con un cable P1 comercial enchufado a la Pi lectora.
+- **Plan A** — medidor real, con un cable P1 comercial o con el inversor
+  propio sobre los GPIO (ver «Advertencia de hardware»).
 - **Plan B** — una computadora hace de medidor por USB-serie: `meter_simulator.py`
   escribe telegramas en el puerto, la Pi lectora los lee como si vinieran del
   medidor. Necesita dos adaptadores USB-serie y un cable entre ellos.
@@ -47,10 +48,36 @@ Plan C:  [PC con p1_source.py] --------------------------> TCP 4000, bytes crudo
 El puerto P1 entrega una señal **invertida** de 5 V open collector y no
 transmite nada hasta que la línea *Data Request* está en alto (§5.7 del
 estándar). Conectar el RJ12 directo al GPIO de la Pi **no funciona**: hace
-falta el inversor y la alimentación que el cable P1 comercial trae adentro.
+falta un inversor y mantener esa línea alta. Hay dos formas de resolverlo, y el
+software es el mismo en las dos.
 
-Ese cable es de recepción. No sirve para simular un medidor: para eso están el
-Plan B y el Plan C.
+**A1 — cable P1 comercial.** Trae el inversor y el Data Request adentro y expone
+un `/dev/ttyUSB*` corriente. Es de recepción: no sirve para simular un medidor,
+para eso están el Plan B y el Plan C.
+
+**A2 — inversor propio sobre los GPIO.** Un NPN en emisor común invierte `Data`
+y entrega el UART ya en 3,3 V a GPIO15 (RXD). El Data Request queda atado a los
+5 V de la Pi, que es lo mismo que hace el cable comercial: siempre alto, nunca
+forzado a 0 V.
+
+| P1 (RJ12) | Circuito | Pi lectora |
+|---|---|---|
+| pin 5 `Data` | 1 kΩ a la base, y 1 kΩ de pull-up a 3V3 | — |
+| — | colector, con 1 kΩ de pull-up a 3V3 | GPIO15 / RXD — pin 10 |
+| pin 2 `Data Request` | directo | 5 V — pin 2 |
+| pines 3 y 6 `GND` | emisor | GND — pin 6 |
+
+Los 5 V solo van al Data Request: al GPIO nunca le llega más de 3,3 V. El
+medidor también ofrece +5 V en el pin 1; tomarlos de la Pi evita depender de él.
+
+`install_reader.sh` ya deja el UART de los GPIO listo (es lo mismo que necesita
+el Plan B-UART) y `relay.py` sondea todos los puertos, así que encuentra
+`/dev/ttyAMA0` sin configurar nada. Hay que reiniciar después de instalar: los
+cambios de `config.txt` solo aplican al arrancar.
+
+Con el circuito armado y el medidor desconectado, la línea queda en bajo
+permanente y el UART ve un *break* continuo: bytes nulos, ningún `/`, y el
+sondeo sigue buscando. Es el mismo síntoma que un medidor mudo.
 
 ## Requisitos
 
@@ -319,6 +346,7 @@ cadena con un puerto serie de mentira y corre en cualquier plataforma.
 | El dashboard dice "No link to the reader Pi" | El cable Ethernet, y `systemctl status relay` en la lectora |
 | El contador de rechazados sube | Ruido en el cable serie, o un cable demasiado largo |
 | El relay no encuentra puerto | `journalctl -u relay -f` lista los puertos que probó |
+| Plan A: el sondeo no encuentra el puerto | ¿Reiniciaste tras `install_reader.sh`? ¿Data Request a 5 V? Sin él el medidor calla |
 | Por UART no llega nada | ¿Reiniciaste las dos Pis? ¿TX contra RX (cruzado) y las masas unidas? `journalctl -u simulator -f` en la Zero |
 | Por UART llegan bytes rotos a ratos | El mini UART deriva: comprueba que `dtoverlay=disable-bt` quedó en `config.txt` y reinicia |
 | La pantalla muestra un error en vez del dashboard | `systemctl status display` |

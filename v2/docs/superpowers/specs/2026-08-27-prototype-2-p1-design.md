@@ -80,6 +80,15 @@ está conectado. No sirve para que una Pi se haga pasar por un medidor. Por eso 
 simulador de Plan B usa adaptadores USB a serie comunes, como en el prototipo 1,
 y el cable P1 queda reservado para Plan A.
 
+**Nota posterior.** El Plan B-UART obligó a preparar el UART de los GPIO en la
+Pi lectora (`enable_uart`, `disable-bt`, consola serie liberada, permisos del
+dispositivo), y `install_reader.sh` lo hace siempre. Eso deja abierta una
+segunda variante de Plan A: un inversor discreto —un NPN en emisor común, con
+`Data Request` atado a los 5 V de la Pi— en lugar del cable comercial. No
+cambia una línea de software: `relay.py` sondea todos los puertos y encuentra
+`/dev/ttyAMA0` igual que encontraría un `/dev/ttyUSB*`. El cableado está en el
+README, en «Advertencia de hardware».
+
 ## Arquitectura
 
 ```
